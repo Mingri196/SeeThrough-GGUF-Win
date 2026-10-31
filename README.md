@@ -4,6 +4,8 @@
 
 把 [IceFog72/see-through-gguf](https://github.com/IceFog72/see-through-gguf)（简称 **STM**：纯 Python + PyTorch 的「单张角色图 → 分层 PSD / 深度 / 骨骼切割」运行时）包装成 **Windows 本地网页工具**。上游代码已作为快照内置在 `stm/`，**一次 clone 即可安装，不需要额外克隆仓库**。
 
+**界面截图**：[工作台（分层 / 成像台）](docs/screenshots/workbench-zh.png) · [设置页（环境信息）](docs/screenshots/settings-zh.png)
+
 ---
 
 ## 1. 快速开始
@@ -301,7 +303,7 @@ SeeThrough-GGUF-Win/
 │   └── patches/apply_use_lama.py / apply_layer_fix.py
 ├── frontend/                  # index.html / styles.css / app.js（原生 JS + GSAP）
 ├── docs/
-│   ├── screenshots/           # 界面截图（桩推理产出，仅示意）
+│   ├── screenshots/           # 界面截图（workbench / settings，中英各一套）
 │   ├── ai-setup.md            # 从零部署任务书：整份交给 AI，让它克隆 + 安装 + 验收
 │   ├── triton-windows.md      # triton-windows 安装 / 手动安装 / 卸载 / 排错
 │   ├── triton-windows.en.md   # 上一份的英文版

@@ -410,7 +410,12 @@
   };
 
   const LS_LANG = "stg.lang";
-  let lang = localStorage.getItem(LS_LANG) === "en" ? "en" : "zh";
+  // ?lang=en / ?lang=zh 可强制语言（便于分享或截图）；否则跟随上次选择
+  const URL_LANG = new URLSearchParams(window.location.search).get("lang");
+  let lang =
+    URL_LANG === "en" ? "en" :
+    URL_LANG === "zh" ? "zh" :
+    localStorage.getItem(LS_LANG) === "en" ? "en" : "zh";
 
   function t(key, vars) {
     const table = I18N[lang] || I18N.zh;
@@ -1772,6 +1777,8 @@
       const dl = node.querySelector(".tile-dl");
       dl.href = img.download_url || img.url;
       dl.setAttribute("download", img.name);
+      // 模板里的 data-i18n 不会被 applyI18n 扫到（这是动态克隆的节点），这里手动填
+      dl.textContent = t("action.download");
       el("tiles").appendChild(node);
     });
 

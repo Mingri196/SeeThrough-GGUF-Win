@@ -4,6 +4,8 @@
 
 A **local Windows web UI** wrapped around [IceFog72/see-through-gguf](https://github.com/IceFog72/see-through-gguf) (aka **STM**: a pure Python + PyTorch runtime that turns a single character image into layered PSD / depth / ragdoll-split parts). Upstream code is vendored as a snapshot under `stm/`, so **one clone is enough — no extra repository to fetch**.
 
+**Screenshots**: [Workbench (layering / stage)](docs/screenshots/workbench-en.png) · [Settings (environment)](docs/screenshots/settings-en.png)
+
 ---
 
 ## 1. Quick start
@@ -305,7 +307,7 @@ SeeThrough-GGUF-Win/
 │   └── patches/apply_use_lama.py / apply_layer_fix.py
 ├── frontend/                  # index.html / styles.css / app.js (vanilla JS + GSAP)
 ├── docs/
-│   ├── screenshots/           # UI screenshots (stub inference, illustrative only)
+│   ├── screenshots/           # UI screenshots (workbench / settings, zh + en)
 │   ├── ai-setup.md            # zero-to-running brief: hand the whole file to an AI
 │   ├── triton-windows.md      # triton-windows install / manual install / uninstall / troubleshooting
 │   ├── triton-windows.en.md   # the same guide in English

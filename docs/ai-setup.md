@@ -295,7 +295,7 @@ SeeThrough-GGUF-Win/
 │   ├── triton-windows.md      # Triton 安装 / 手动安装 / 卸载 / 排错
 │   ├── triton-windows.en.md   # 上一份的英文版
 │   ├── triton-windows-ai.md   # Triton 操作任务书（给 AI）
-│   └── screenshots/           # 界面截图
+│   └── screenshots/           # 界面截图（workbench / settings，中英各一套）
 ├── stm/                       # 上游代码快照（Apache-2.0，已打 use_lama 与图层修补补丁）
 ├── models/                    # GGUF 权重（不入库，自己放）
 ├── components/                # 首次推理的辅助组件（HF / torch.hub，不入库，自动创建）

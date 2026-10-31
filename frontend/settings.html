@@ -256,6 +256,7 @@
       "row.compileDequant": "compile_dequant",
       "row.layerFixDefault": "layer_fix 默认",
       "row.attention": "注意力后端",
+      "tag.available": "可用",
       "row.listen": "监听地址",
       "row.disk": "剩余 / 总计",
       "row.configuredAddr": "配置地址",
@@ -418,6 +419,7 @@
       "row.compileDequant": "compile_dequant",
       "row.layerFixDefault": "layer_fix default",
       "row.attention": "Attention backend",
+      "tag.available": "available",
       "row.listen": "Listening on",
       "row.disk": "Free / total",
       "row.configuredAddr": "Configured address",
@@ -681,7 +683,8 @@
       row(t("row.layerFixDefault"), cfg.layer_fix ? '<span class="tag ok">' + esc(t("tag.on")) + "</span>"
                                                   : '<span class="tag off">' + esc(t("tag.off")) + "</span>") +
       row(t("row.attention"), esc(cfg.attention_backend) + ' <span class="dim">' +
-          esc(Object.keys(attention).filter(function (k) { return attention[k]; }).join(" / ")) + "</span>") +
+          esc(t("tag.available") + ": " +
+              Object.keys(attention).filter(function (k) { return attention[k]; }).join(" / ")) + "</span>") +
       row(t("row.listen"), esc(cfg.host + ":" + cfg.port) + ' <span class="dim">' + esc(t("tag.restartHint")) + "</span>") +
       "</div>");
 
