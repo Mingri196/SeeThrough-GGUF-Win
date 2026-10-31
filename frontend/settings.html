@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>设置 · SeeThrough GGUF</title>
+<link rel="stylesheet" href="/styles.css" />
+<style>
+  html, body {
+    margin: 0;
+    height: auto !important;
+    min-height: 100vh;
+    overflow-y: auto !important;
+    overflow-x: hidden;
+  }
+  body { background: var(--paper); color: var(--ink); font-family: var(--font-body); }
+
+  .app { min-height: 100vh; }
+
+  .rail {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 208px;
+    box-sizing: border-box;
+    padding: 22px 0 16px;
+    background: var(--paper-raised);
+    border-right: 1px solid var(--line-strong);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .rail-head { padding: 0 18px 14px; }
+  .rail-head h1 { margin: 0 0 2px; font-size: 16px; font-weight: 500; }
+  .rail-nav { display: flex; flex-direction: column; }
+  .rail-nav a {
+    display: block;
+    padding: 8px 18px;
+    font-size: 12.5px;
+    color: var(--ink-muted);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+  }
+  .rail-nav a:hover { color: var(--ink); }
+  .rail-nav a.active {
+    color: var(--accent-deep);
+    border-left-color: var(--accent);
+    background: var(--accent-wash);
+  }
+
+  .pane { margin-left: 208px; min-width: 0; padding: 22px 28px 60px; }
+  .pane-inner { max-width: 880px; }
+
+  .pane-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding-bottom: 13px;
+    border-bottom: 1px solid var(--line-strong);
+  }
+  .pane-head h2 { margin: 0; font-size: 15px; font-weight: 500; }
+  .pane-head .sub { font-size: 11.5px; color: var(--ink-muted); }
+  .pane-head .spacer { margin-left: auto; }
+
+  .btn { border: 1px solid var(--line-strong); background: var(--paper-raised); color: var(--ink-soft);
+         font-family: var(--font-body); font-size: 12px; padding: 0 10px; height: 32px; cursor: pointer;
+         display: inline-flex; align-items: center; }
+  .btn:hover { border-color: var(--ink); color: var(--ink); }
+  .btn.primary { border-color: var(--accent); color: var(--accent-deep); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+  section { margin-top: 20px; }
+  section:first-of-type { margin-top: 18px; }
+  section > h3 { font-size: 12px; font-weight: 500; color: var(--ink-muted); letter-spacing: .06em;
+                 margin: 0 0 8px; text-transform: uppercase; }
+  .rows { border: 1px solid var(--line); background: var(--paper-raised); }
+  .row { display: flex; gap: 14px; align-items: baseline; padding: 9px 12px; border-bottom: 1px solid var(--line-faint); }
+  .row:last-child { border-bottom: 0; }
+  .row .k { flex: 0 0 132px; font-size: 12px; color: var(--ink-muted); }
+  .row .v { flex: 1 1 auto; min-width: 0; font-family: var(--font-mono); font-size: 12px; color: var(--ink); word-break: break-all; }
+  .v .dim { color: var(--ink-muted); }
+  .tag { font-family: var(--font-mono); font-size: 10.5px; padding: 1px 6px; border: 1px solid var(--line-strong); color: var(--ink-muted); }
+  .tag.ok { border-color: rgba(44,103,66,.45); color: var(--ok); background: rgba(44,103,66,.07); }
+  .tag.warn { border-color: rgba(138,90,18,.45); color: var(--warn); background: rgba(138,90,18,.07); }
+  .tag.off { border-color: var(--line); color: var(--ink-muted); background: var(--paper-sunk); }
+  table.models { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11.5px;
+                 background: var(--paper-raised); border: 1px solid var(--line); }
+  table.models th, table.models td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--line-faint); }
+  table.models th { color: var(--ink-muted); font-weight: 400; font-size: 11px; }
+  table.models td.num { text-align: right; white-space: nowrap; }
+  .empty { padding: 14px 12px; font-size: 12px; color: var(--ink-muted); margin: 0; }
+  .foot { margin-top: 22px; font-size: 11px; color: var(--ink-muted); line-height: 1.7; }
+  .skel { height: 132px; border: 1px solid var(--line-faint); background: var(--paper-sunk); }
+
+  .edit-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .edit-input {
+    height: 28px; padding: 0 8px; width: 190px; box-sizing: border-box;
+    border: 1px solid var(--line-strong); background: var(--paper); color: var(--ink);
+    font-family: var(--font-mono); font-size: 12px;
+  }
+  .edit-input:focus { outline: none; border-color: var(--accent); }
+  .save-btn {
+    height: 28px; padding: 0 12px; border: 1px solid var(--accent); background: var(--paper-raised);
+    color: var(--accent-deep); font-family: var(--font-body); font-size: 12px; cursor: pointer;
+  }
+  .save-btn:hover { background: var(--accent-wash); }
+  .save-btn:disabled { opacity: .45; cursor: not-allowed; background: var(--paper-sunk); }
+  .save-state { font-family: var(--font-body); font-size: 11px; color: var(--ink-muted); }
+  .save-state.err { color: var(--warn); }
+  .save-state.ok { color: var(--ok); }
+
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+  .actions .note { font-size: 11px; color: var(--ink-muted); }
+  .hint { margin: 10px 0 0; padding: 9px 12px; border: 1px solid var(--line); background: var(--paper-raised);
+          border-left: 3px solid var(--line-strong); font-size: 11.5px; color: var(--ink-muted); line-height: 1.7; }
+  .hint b { color: var(--ink-soft); font-weight: 500; }
+
+  @media (max-width: 820px) {
+    .rail { position: static; width: auto; height: auto; flex-direction: row; align-items: center; gap: 10px;
+            padding: 12px 14px; border-right: 0; border-bottom: 1px solid var(--line-strong); overflow: visible; }
+    .rail-head { padding: 0; }
+    .rail-nav { flex-direction: row; }
+    .rail-nav a { border-left: 0; border-bottom: 2px solid transparent; padding: 6px 10px; }
+    .rail-nav a.active { border-left-color: transparent; border-bottom-color: var(--accent); }
+    .pane { margin-left: 0; padding: 18px 16px 48px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail">
+    <div class="rail-head">
+      <h1 data-i18n="rail.title">设置</h1>
+    </div>
+    <nav class="rail-nav" id="railNav">
+      <a href="#env" data-view="env" data-i18n="nav.env">环境信息</a>
+      <a href="#startup" data-view="startup" data-i18n="nav.startup">启动与端口</a>
+      <a href="#maint" data-view="maint" data-i18n="nav.maint">维护与诊断</a>
+    </nav>
+  </aside>
+
+  <main class="pane">
+    <div class="pane-inner">
+
+      <!-- ───────── 环境信息 ───────── -->
+      <div class="view" id="view-env">
+        <header class="pane-head">
+          <h2 data-i18n="title.env">环境信息</h2>
+          <span class="sub" data-i18n="head.env.sub">运行时、硬件与补丁状态</span>
+          <span class="spacer"><button class="btn primary" id="copyBtn" type="button" data-i18n="btn.copy">复制诊断</button></span>
+        </header>
+        <div id="content"><div class="skel"></div></div>
+        <p class="foot" data-i18n-html="foot.env"></p>
+      </div>
+
+      <!-- ───────── 启动与端口 ───────── -->
+      <div class="view" id="view-startup" hidden>
+        <header class="pane-head">
+          <h2 data-i18n="title.startup">启动与端口</h2>
+          <span class="sub" data-i18n="head.startup.sub">监听地址、进程与 config.json</span>
+        </header>
+        <div id="content-startup"><div class="skel"></div></div>
+        <div class="hint" data-i18n-html="hint.startup"></div>
+      </div>
+
+      <!-- ───────── 维护与诊断 ───────── -->
+      <div class="view" id="view-maint" hidden>
+        <header class="pane-head">
+          <h2 data-i18n="title.maint">维护与诊断</h2>
+          <span class="sub" data-i18n="head.maint.sub">完整性检查与常用目录</span>
+          <span class="spacer"><button class="btn primary" id="termBtn" type="button" data-i18n="btn.terminal">打开命令提示符</button></span>
+        </header>
+        <div id="content-maint"><div class="skel"></div></div>
+        <div class="actions">
+          <button class="btn" type="button" data-target="outputs" data-i18n="btn.openOutputs">打开 outputs</button>
+          <button class="btn" type="button" data-target="models" data-i18n="btn.openModels">打开 models</button>
+          <button class="btn" type="button" data-target="root" data-i18n="btn.openRoot">打开项目根</button>
+          <span class="note" id="maintNote"></span>
+        </div>
+        <p class="foot" data-i18n-html="foot.maint"></p>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script>
+(function () {
+  var LS_LANG = "stg.lang";
+  var params = new URLSearchParams(location.search);
+
+  var I18N = {
+    zh: {
+      "rail.title": "设置",
+      "nav.env": "环境信息",
+      "nav.startup": "启动与端口",
+      "nav.maint": "维护与诊断",
+      "title.env": "环境信息",
+      "title.startup": "启动与端口",
+      "title.maint": "维护与诊断",
+      "title.page": "设置",
+      "head.env.sub": "运行时、硬件与补丁状态",
+      "head.startup.sub": "监听地址、进程与 config.json",
+      "head.maint.sub": "完整性检查与常用目录",
+
+      "btn.copy": "复制诊断",
+      "btn.copied": "已复制",
+      "btn.copyFail": "复制失败",
+      "btn.terminal": "打开命令提示符",
+      "btn.openOutputs": "打开 outputs",
+      "btn.openModels": "打开 models",
+      "btn.openRoot": "打开项目根",
+      "btn.save": "保存",
+
+      "foot.env": '只读页面：数值由当前进程实时读取，不修改任何配置。改端口、模型路径请编辑项目根目录的 <b>config.json</b>，改完重启 <b>2-launch.bat</b>。',
+      "foot.maint": '这一页只做检查和打开目录，不修改任何文件。缺补丁就重跑 <b>1-setup.bat</b>，缺模型按 README 第 2 节下载。',
+      "hint.startup": '点「保存」会把新值直接写回 <b>config.json</b>（原文件备份为 <b>config.json.bak</b>），<b>但不会立刻生效</b>：关闭服务窗口后重新运行 <b>2-launch.bat</b>，才会按新地址和新端口监听。<br /><b>127.0.0.1</b> 只有本机能访问；<b>0.0.0.0</b> 让局域网内其他设备也能打开这个页面，本机的任务、产物与「打开文件夹」按钮会一并暴露，建议只在可信网络里这么用。<br />端口被占用时服务起不来，控制台窗口会打印 <b>Address already in use</b> —— 换回旧端口或改成一个空闲端口再重启。改坏了也不怕：<b>config.json.bak</b> 是上一份配置，复制回去即可。',
+
+      "sec.runtime": "运行时",
+      "sec.hw": "硬件与网络",
+      "sec.paths": "路径",
+      "sec.models": "模型文件",
+      "sec.patches": "补丁与开关",
+      "sec.disk": "磁盘",
+      "sec.listen": "监听",
+      "sec.process": "进程",
+      "sec.configFile": "配置文件",
+      "sec.service": "服务",
+      "sec.integrity": "完整性",
+      "sec.output": "输出",
+
+      "row.python": "Python",
+      "row.torch": "torch",
+      "row.xformers": "xformers",
+      "row.triton": "triton-windows",
+      "row.gpu": "显卡",
+      "row.vram": "显存",
+      "row.driver": "驱动",
+      "row.os": "系统",
+      "row.cpu": "CPU",
+      "row.ram": "内存",
+      "row.hf": "下载源",
+      "row.root": "项目根",
+      "row.stm": "STM",
+      "row.modelsDir": "模型目录",
+      "row.outputsDir": "输出目录",
+      "row.components": "组件缓存",
+      "tag.compProject": "项目内",
+      "tag.compUser": "用户目录",
+      "unit.files": "个文件",
+      "row.uselama": "use_lama 补丁",
+      "row.layerDrop": "图层修补 · 丢层",
+      "row.layerOrder": "图层修补 · 叠序",
+      "row.compileDequant": "compile_dequant",
+      "row.layerFixDefault": "layer_fix 默认",
+      "row.attention": "注意力后端",
+      "row.listen": "监听地址",
+      "row.disk": "剩余 / 总计",
+      "row.configuredAddr": "配置地址",
+      "row.configuredPort": "配置端口",
+      "row.changeHost": "更改地址",
+      "row.changePort": "更改端口",
+      "row.entry": "访问入口",
+      "row.pid": "PID",
+      "row.startedAt": "启动于",
+      "row.uptime": "已运行",
+      "row.cwd": "工作目录",
+      "row.path": "路径",
+      "row.modified": "最后修改",
+      "row.size": "大小",
+      "row.status": "状态",
+      "row.venv": "虚拟环境 .venv",
+      "row.stmCode": "STM 代码",
+      "row.modelLayer": "图层模型",
+      "row.modelDepth": "深度模型",
+      "row.patch": "补丁",
+      "row.jobs": "任务数",
+      "row.space": "占用",
+      "row.latest": "最近一次",
+
+      "table.file": "文件",
+      "table.role": "角色",
+      "table.size": "大小",
+      "table.empty": "models/ 下还没有 .gguf，按 README 第 2 节准备两个主模型。",
+
+      "tag.applied": "已应用",
+      "tag.notApplied": "未应用",
+      "tag.on": "开",
+      "tag.off": "关",
+      "tag.notInstalled": "未安装",
+      "tag.present": "就位",
+      "tag.missing": "未找到",
+      "tag.ready": "已就绪",
+      "tag.venvMissing": "缺失，先跑 1-setup.bat",
+      "tag.stmMissing": "缺失 {n} 个文件",
+      "tag.running": "运行中",
+      "tag.localOnly": "仅本机",
+      "tag.lan": "局域网可访问",
+      "tag.stale": "待重启生效",
+      "tag.noFile": "文件不存在",
+      "tag.noLatency": "延迟未测",
+      "tag.autoDetect": "自动（启动时探测）",
+      "tag.noGpu": "未检测到 NVIDIA 显卡",
+      "tag.restartHint": "改 config.json 后重启",
+
+      "save.saving": "保存中…",
+      "save.same": "没有变化",
+      "save.ok": "已保存，重启 2-launch.bat 生效",
+      "save.busyPort": "已保存 · 该端口已被占用，重启前请换一个",
+      "save.emptyHost": "地址不能为空",
+      "save.badPort": "端口需为 1–65535 的整数",
+      "save.badHost": "地址格式不对",
+      "save.localOnly": "只有本机（127.0.0.1）能保存",
+      "save.writeFail": "写入 config.json 失败",
+      "save.fail": "保存失败",
+      "save.netFail": "保存失败：服务无响应",
+      "save.localOnlyHint": "仅本机打开时可改",
+
+      "note.opening": "打开中…",
+      "note.opened": "已打开 {path}",
+      "note.openFail": "打开失败：{error}",
+      "note.noResponse": "打开失败：服务无响应",
+      "note.termSending": "正在打开…",
+      "note.termOpened": "已打开命令提示符（已激活 .venv）",
+      "note.termFail": "打开失败：{error}",
+      "err.localOnly": "只有本机（127.0.0.1）能{action}",
+      "err.unsupported": "仅 Windows 支持",
+      "err.missingEnvBat": "缺少 3-env.bat，重跑 1-setup.bat 或从仓库补齐",
+      "err.spawnFailed": "启动失败",
+      "err.invalidTarget": "无效目标",
+      "err.notFound": "目录不存在",
+      "err.openFailed": "打开失败",
+      "err.unknown": "未知错误",
+      "err.readFail": "读取环境信息失败：服务未启动或接口异常。",
+
+      "unit.day": "天",
+      "unit.hour": "小时",
+      "unit.min": "分",
+      "unit.sec": "秒",
+
+      "diag.title": "SeeThrough-GGUF-Win 环境诊断",
+      "diag.gpu": "GPU",
+      "diag.os": "OS",
+      "diag.extra": "xformers",
+      "diag.patch": "补丁",
+      "diag.models": "模型",
+      "diag.hf": "下载源",
+      "diag.listen": "监听",
+      "diag.jobs": "任务",
+      "diag.disk": "磁盘剩余",
+      "diag.path": "路径",
+      "diag.auto": "自动"
+    },
+
+    en: {
+      "rail.title": "Settings",
+      "nav.env": "Environment",
+      "nav.startup": "Startup & port",
+      "nav.maint": "Maintenance",
+      "title.env": "Environment",
+      "title.startup": "Startup & port",
+      "title.maint": "Maintenance",
+      "title.page": "Settings",
+      "head.env.sub": "Runtime, hardware and patch state",
+      "head.startup.sub": "Listen address, process and config.json",
+      "head.maint.sub": "Integrity checks and common folders",
+
+      "btn.copy": "Copy diagnostics",
+      "btn.copied": "Copied",
+      "btn.copyFail": "Copy failed",
+      "btn.terminal": "Open command prompt",
+      "btn.openOutputs": "Open outputs",
+      "btn.openModels": "Open models",
+      "btn.openRoot": "Open project root",
+      "btn.save": "Save",
+
+      "foot.env": 'Read-only page: values are read from the running process and nothing is written. To change the port or model paths, edit <b>config.json</b> in the project root and restart <b>2-launch.bat</b>.',
+      "foot.maint": 'This page only inspects and opens folders; it never modifies files. Missing patches: re-run <b>1-setup.bat</b>. Missing models: see README section 2.',
+      "hint.startup": 'Saving writes the new value straight into <b>config.json</b> (the old file is kept as <b>config.json.bak</b>), <b>but it does not take effect immediately</b>: close the server window and run <b>2-launch.bat</b> again to listen on the new address and port.<br /><b>127.0.0.1</b> is reachable only from this machine; <b>0.0.0.0</b> lets other devices on the LAN open this page too, which also exposes your jobs, outputs and the "open folder" buttons — only use it on a trusted network.<br />If the port is taken the service will not start and the console prints <b>Address already in use</b> — switch back or pick a free port and restart. If you lock yourself out, <b>config.json.bak</b> holds the previous config: copy it back.',
+
+      "sec.runtime": "Runtime",
+      "sec.hw": "Hardware & network",
+      "sec.paths": "Paths",
+      "sec.models": "Model files",
+      "sec.patches": "Patches & switches",
+      "sec.disk": "Disk",
+      "sec.listen": "Listen",
+      "sec.process": "Process",
+      "sec.configFile": "Config file",
+      "sec.service": "Service",
+      "sec.integrity": "Integrity",
+      "sec.output": "Output",
+
+      "row.python": "Python",
+      "row.torch": "torch",
+      "row.xformers": "xformers",
+      "row.triton": "triton-windows",
+      "row.gpu": "GPU",
+      "row.vram": "VRAM",
+      "row.driver": "Driver",
+      "row.os": "OS",
+      "row.cpu": "CPU",
+      "row.ram": "RAM",
+      "row.hf": "Download source",
+      "row.root": "Project root",
+      "row.stm": "STM",
+      "row.modelsDir": "Model dir",
+      "row.outputsDir": "Output dir",
+      "row.components": "Component cache",
+      "tag.compProject": "in project",
+      "tag.compUser": "user profile",
+      "unit.files": "files",
+      "row.uselama": "use_lama patch",
+      "row.layerDrop": "Layer fix · dropped",
+      "row.layerOrder": "Layer fix · eye order",
+      "row.compileDequant": "compile_dequant",
+      "row.layerFixDefault": "layer_fix default",
+      "row.attention": "Attention backend",
+      "row.listen": "Listening on",
+      "row.disk": "Free / total",
+      "row.configuredAddr": "Configured address",
+      "row.configuredPort": "Configured port",
+      "row.changeHost": "Change address",
+      "row.changePort": "Change port",
+      "row.entry": "Entry URL",
+      "row.pid": "PID",
+      "row.startedAt": "Started at",
+      "row.uptime": "Uptime",
+      "row.cwd": "Working dir",
+      "row.path": "Path",
+      "row.modified": "Last modified",
+      "row.size": "Size",
+      "row.status": "Status",
+      "row.venv": "Virtualenv .venv",
+      "row.stmCode": "STM code",
+      "row.modelLayer": "Layer model",
+      "row.modelDepth": "Depth model",
+      "row.patch": "Patches",
+      "row.jobs": "Jobs",
+      "row.space": "On disk",
+      "row.latest": "Latest run",
+
+      "table.file": "File",
+      "table.role": "Role",
+      "table.size": "Size",
+      "table.empty": "No .gguf under models/ yet. Prepare the two main models as described in README section 2.",
+
+      "tag.applied": "applied",
+      "tag.notApplied": "not applied",
+      "tag.on": "on",
+      "tag.off": "off",
+      "tag.notInstalled": "not installed",
+      "tag.present": "ready",
+      "tag.missing": "not found",
+      "tag.ready": "ready",
+      "tag.venvMissing": "missing, run 1-setup.bat",
+      "tag.stmMissing": "{n} file(s) missing",
+      "tag.running": "running",
+      "tag.localOnly": "local only",
+      "tag.lan": "LAN reachable",
+      "tag.stale": "restart pending",
+      "tag.noFile": "file missing",
+      "tag.noLatency": "latency not measured",
+      "tag.autoDetect": "auto (probed at startup)",
+      "tag.noGpu": "no NVIDIA GPU detected",
+      "tag.restartHint": "restart after editing config.json",
+
+      "save.saving": "Saving…",
+      "save.same": "no change",
+      "save.ok": "Saved — restart 2-launch.bat to apply",
+      "save.busyPort": "Saved · port is in use, pick another before restarting",
+      "save.emptyHost": "Address cannot be empty",
+      "save.badPort": "Port must be an integer between 1 and 65535",
+      "save.badHost": "Invalid address format",
+      "save.localOnly": "Only the local machine (127.0.0.1) can save",
+      "save.writeFail": "Failed to write config.json",
+      "save.fail": "Save failed",
+      "save.netFail": "Save failed: no response from the service",
+      "save.localOnlyHint": "editable locally only",
+
+      "note.opening": "Opening…",
+      "note.opened": "Opened {path}",
+      "note.openFail": "Open failed: {error}",
+      "note.noResponse": "Open failed: no response from the service",
+      "note.termSending": "Opening…",
+      "note.termOpened": "Command prompt opened (with .venv activated)",
+      "note.termFail": "Open failed: {error}",
+      "err.localOnly": "Only the local machine (127.0.0.1) can {action}",
+      "err.unsupported": "Windows only",
+      "err.missingEnvBat": "3-env.bat is missing; re-run 1-setup.bat",
+      "err.spawnFailed": "Failed to start",
+      "err.invalidTarget": "Invalid target",
+      "err.notFound": "Folder not found",
+      "err.openFailed": "Open failed",
+      "err.unknown": "Unknown error",
+      "err.readFail": "Failed to read environment info: the service is not running or the API failed.",
+
+      "unit.day": "d",
+      "unit.hour": "h",
+      "unit.min": "m",
+      "unit.sec": "s",
+
+      "diag.title": "SeeThrough-GGUF-Win environment diagnostics",
+      "diag.gpu": "GPU",
+      "diag.os": "OS",
+      "diag.extra": "xformers",
+      "diag.patch": "Patches",
+      "diag.models": "Models",
+      "diag.hf": "Download source",
+      "diag.listen": "Listen",
+      "diag.jobs": "Jobs",
+      "diag.disk": "Disk free",
+      "diag.path": "Path",
+      "diag.auto": "auto"
+    }
+  };
+
+  // ?lang=en / ?lang=zh 可强制语言（便于分享或截图）；否则跟随工作台的 stg.lang，并实时响应切换
+  var lang = params.get("lang") === "en" ? "en"
+    : params.get("lang") === "zh" ? "zh"
+    : (localStorage.getItem(LS_LANG) === "en" ? "en" : "zh");
+
+  var data = null;
+  var VIEWS = ["env", "startup", "maint"];
+
+  function t(key, vars) {
+    var dict = I18N[lang] || I18N.zh;
+    var text = dict[key] != null ? dict[key] : (I18N.zh[key] != null ? I18N.zh[key] : key);
+    if (vars) {
+      Object.keys(vars).forEach(function (name) {
+        text = text.replace(new RegExp("\\{" + name + "\\}", "g"), vars[name]);
+      });
+    }
+    return text;
+  }
+
+  function el(id) { return document.getElementById(id); }
+
+  function esc(text) {
+    return String(text == null ? "" : text).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  function gb(mb) { return (mb / 1024).toFixed(1) + " GB"; }
+
+  function row(key, valueHtml) {
+    return '<div class="row"><span class="k">' + esc(key) + '</span><span class="v">' + valueHtml + "</span></div>";
+  }
+
+  function plain(value) { return value == null || value === "" ? '<span class="dim">—</span>' : esc(value); }
+
+  function tag(ok, okText, badText) {
+    return ok ? '<span class="tag ok">' + esc(okText) + "</span>" : '<span class="tag warn">' + esc(badText) + "</span>";
+  }
+
+  function section(title, body) {
+    return "<section><h3>" + esc(title) + "</h3>" + body + "</section>";
+  }
+
+  function uptime(seconds) {
+    var s = Math.max(0, Math.floor(seconds || 0));
+    var d = Math.floor(s / 86400); s -= d * 86400;
+    var h = Math.floor(s / 3600); s -= h * 3600;
+    var m = Math.floor(s / 60); s -= m * 60;
+    var out = [];
+    var sep = lang === "zh" ? "" : " ";
+    if (d) out.push(d + sep + t("unit.day"));
+    if (h) out.push(h + sep + t("unit.hour"));
+    if (m) out.push(m + sep + t("unit.min"));
+    if (!d && !h) out.push(s + sep + t("unit.sec"));
+    return out.join(" ");
+  }
+
+  var upTimer = null;
+
+  function currentUptime() {
+    if (!data || !data.server) return 0;
+    var srv = data.server;
+    // 用绝对启动时刻在本地推算，避免每秒请求接口、也不会随刷新漂移
+    if (srv.started_epoch) return Date.now() / 1000 - srv.started_epoch;
+    return srv.uptime_s || 0;
+  }
+
+  function tickUptime() {
+    var text = uptime(currentUptime());
+    Array.prototype.forEach.call(document.querySelectorAll(".uptime"), function (node) {
+      node.textContent = text;
+    });
+  }
+
+  function startUptimeTick() {
+    if (upTimer) return;
+    tickUptime();
+    upTimer = setInterval(tickUptime, 1000);
+  }
+
+  function bytes(n) {
+    if (!n) return "0 B";
+    return n < 1024 ? n + " B" : (n / 1024).toFixed(1) + " KB";
+  }
+
+  /* ───────────────────────── 环境信息 ───────────────────────── */
+  function componentsCell() {
+    var c = data.components || {};
+    if (!c.hf_home) return '<span class="dim">—</span>';
+    var srcTag = c.source === "project"
+      ? '<span class="tag ok">' + esc(t("tag.compProject")) + "</span>"
+      : '<span class="tag off">' + esc(t("tag.compUser")) + "</span>";
+    var size = (c.size_gb || 0) + " GB" + (c.files ? " · " + c.files + " " + t("unit.files") : "");
+    return esc(c.hf_home) + " " + srcTag + ' <span class="dim">' + esc(size) + "</span>";
+  }
+
+  function renderEnv() {
+    var gpu = (data.hardware || {}).gpu;
+    var hw = data.hardware || {};
+    var rt = data.runtime || {};
+    var cfg = data.config || {};
+    var patches = data.patches || {};
+    var disk = data.disk || {};
+    var models = data.models || [];
+    var attention = cfg.attention_available || {};
+
+    var html = "";
+
+    html += section(t("sec.runtime"), '<div class="rows">' +
+      row(t("row.python"), plain(rt.python) + ' <span class="dim">' + esc(rt.executable || "") + "</span>") +
+      row(t("row.torch"), plain(rt.torch) + (rt.cuda ? ' <span class="dim">/ CUDA ' + esc(rt.cuda) + "</span>" : "")) +
+      row(t("row.xformers"), rt.xformers ? '<span class="tag ok">' + esc(rt.xformers) + "</span>"
+                                   : '<span class="tag off">' + esc(t("tag.notInstalled")) + "</span>") +
+      row(t("row.triton"), rt.triton ? '<span class="tag ok">' + esc(rt.triton) + "</span>"
+                                       : '<span class="tag off">' + esc(t("tag.notInstalled")) + "</span>") +
+      "</div>");
+
+    var source = hw.hf_endpoint
+      ? esc(hw.hf_endpoint) + (hw.hf_latency_ms != null
+          ? ' <span class="tag ok">' + esc(hw.hf_latency_ms + " ms") + "</span>"
+          : ' <span class="tag off">' + esc(t("tag.noLatency")) + "</span>")
+      : '<span class="dim">' + esc(t("tag.autoDetect")) + "</span>";
+
+    html += section(t("sec.hw"), '<div class="rows">' +
+      row(t("row.gpu"), gpu ? esc(gpu.name) : '<span class="tag warn">' + esc(t("tag.noGpu")) + "</span>") +
+      row(t("row.vram"), gpu ? esc(gb(gpu.memory_mb)) : "—") +
+      row(t("row.driver"), gpu ? esc(gpu.driver) : "—") +
+      row(t("row.os"), plain(hw.os)) +
+      row(t("row.cpu"), plain(hw.cpu)) +
+      row(t("row.ram"), esc(hw.ram_gb ? hw.ram_gb + " GB" : "—")) +
+      row(t("row.hf"), source) +
+      "</div>");
+
+    html += section(t("sec.paths"), '<div class="rows">' +
+      row(t("row.root"), plain(data.paths.root)) +
+      row(t("row.stm"), plain(data.paths.stm)) +
+      row(t("row.modelsDir"), plain(data.paths.models)) +
+      row(t("row.outputsDir"), plain(data.paths.outputs)) +
+      row(t("row.components"), componentsCell()) +
+      "</div>");
+
+    var modelsBody;
+    if (models.length) {
+      modelsBody = '<table class="models"><thead><tr><th>' + esc(t("table.file")) + "</th><th>" +
+                   esc(t("table.role")) + '</th><th class="num">' + esc(t("table.size")) + "</th></tr></thead><tbody>";
+      models.forEach(function (m) {
+        modelsBody += "<tr><td>" + esc(m.rel) + "</td><td>" + esc(m.role) + '</td><td class="num">' +
+                      (m.size / 1024 ** 3).toFixed(2) + " GiB</td></tr>";
+      });
+      modelsBody += "</tbody></table>";
+    } else {
+      modelsBody = '<div class="rows"><p class="empty">' + esc(t("table.empty")) + "</p></div>";
+    }
+    html += section(t("sec.models"), modelsBody);
+
+    html += section(t("sec.patches"), '<div class="rows">' +
+      row(t("row.uselama"), tag(patches.use_lama, t("tag.applied"), t("tag.notApplied"))) +
+      row(t("row.layerDrop"), tag(patches.layer_fix_drop, t("tag.applied"), t("tag.notApplied"))) +
+      row(t("row.layerOrder"), tag(patches.layer_fix_order, t("tag.applied"), t("tag.notApplied"))) +
+      row(t("row.compileDequant"), cfg.compile_dequant ? '<span class="tag ok">' + esc(t("tag.on")) + "</span>"
+                                                       : '<span class="tag off">' + esc(t("tag.off")) + "</span>") +
+      row(t("row.layerFixDefault"), cfg.layer_fix ? '<span class="tag ok">' + esc(t("tag.on")) + "</span>"
+                                                  : '<span class="tag off">' + esc(t("tag.off")) + "</span>") +
+      row(t("row.attention"), esc(cfg.attention_backend) + ' <span class="dim">' +
+          esc(Object.keys(attention).filter(function (k) { return attention[k]; }).join(" / ")) + "</span>") +
+      row(t("row.listen"), esc(cfg.host + ":" + cfg.port) + ' <span class="dim">' + esc(t("tag.restartHint")) + "</span>") +
+      "</div>");
+
+    html += section(t("sec.disk"), '<div class="rows">' +
+      row(t("row.disk"), esc(disk.free_gb + " GB / " + disk.total_gb + " GB")) +
+      "</div>");
+
+    el("content").innerHTML = html;
+  }
+
+  /* ───────────────────────── 启动与端口 ───────────────────────── */
+  function editRow(label, key, value, hint) {
+    return '<div class="row"><span class="k">' + esc(label) + '</span><span class="v"><span class="edit-line">' +
+      '<button class="save-btn" type="button" data-save="' + key + '">' + esc(t("btn.save")) + "</button>" +
+      '<input class="edit-input" id="edit-' + key + '" value="' + esc(value) + '" spellcheck="false" autocomplete="off" />' +
+      '<span class="save-state" id="state-' + key + '">' + (hint || "") + "</span>" +
+      "</span></span></div>";
+  }
+
+  function setSaveState(key, text, kind) {
+    var node = el("state-" + key);
+    if (!node) return;
+    node.textContent = text;
+    node.className = "save-state" + (kind ? " " + kind : "");
+  }
+
+  function saveConfig(key) {
+    if (!data) return;
+    var host = key === "host" ? el("edit-host").value.trim() : data.config.host;
+    var port = key === "port" ? Number(el("edit-port").value) : data.config.port;
+    if (key === "host" && !host) { setSaveState("host", t("save.emptyHost"), "err"); return; }
+    if (key === "port" && (!Number.isInteger(port) || port < 1 || port > 65535)) {
+      setSaveState("port", t("save.badPort"), "err");
+      return;
+    }
+    setSaveState(key, t("save.saving"));
+    fetch("/api/config-file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ host: host, port: port })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (payload) {
+        if (!payload || !payload.ok) {
+          var map = {
+            invalid_host: t("save.badHost"),
+            invalid_port: t("save.badPort"),
+            local_only: t("save.localOnly"),
+            write_failed: t("save.writeFail")
+          };
+          setSaveState(key, map[(payload || {}).error] || t("save.fail"), "err");
+          return;
+        }
+        data.config.host = payload.host;
+        data.config.port = payload.port;
+        data.server.config_stale = true;
+        renderStartup();
+        var text = payload.unchanged ? t("save.same")
+          : payload.port_in_use ? t("save.busyPort")
+          : t("save.ok");
+        setSaveState(key, text, payload.port_in_use ? "err" : "ok");
+      })
+      .catch(function () { setSaveState(key, t("save.netFail"), "err"); });
+  }
+
+  function wireStartup() {
+    var local = !(data && data.server && data.server.local_request === false);
+    Array.prototype.forEach.call(document.querySelectorAll("#content-startup [data-save]"), function (btn) {
+      if (!local) { btn.disabled = true; return; }
+      btn.addEventListener("click", function () { saveConfig(btn.dataset.save); });
+    });
+    ["host", "port"].forEach(function (key) {
+      var input = el("edit-" + key);
+      if (!input) return;
+      input.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") { event.preventDefault(); saveConfig(key); }
+      });
+    });
+  }
+
+  function renderStartup() {
+    var cfg = data.config || {};
+    var srv = data.server || {};
+    var cf = data.config_file || {};
+
+    var lan = cfg.host && cfg.host !== "127.0.0.1" && cfg.host !== "localhost";
+    var stale = !!srv.config_stale;
+    var local = srv.local_request !== false;
+
+    var html = "";
+
+    html += section(t("sec.listen"), '<div class="rows">' +
+      row(t("row.configuredAddr"), esc(cfg.host) + " " +
+          (lan ? '<span class="tag warn">' + esc(t("tag.lan")) + "</span>"
+               : '<span class="tag ok">' + esc(t("tag.localOnly")) + "</span>") +
+          (stale ? ' <span class="tag warn">' + esc(t("tag.stale")) + "</span>" : "")) +
+      row(t("row.configuredPort"), esc(String(cfg.port))) +
+      editRow(t("row.changeHost"), "host", cfg.host, local ? "" : esc(t("save.localOnlyHint"))) +
+      editRow(t("row.changePort"), "port", cfg.port, local ? "" : esc(t("save.localOnlyHint"))) +
+      row(t("row.entry"), esc(cfg.host === "0.0.0.0"
+          ? "http://<LAN IP>:" + cfg.port
+          : "http://localhost:" + cfg.port)) +
+      "</div>");
+
+    html += section(t("sec.process"), '<div class="rows">' +
+      row(t("row.pid"), plain(srv.pid)) +
+      row(t("row.startedAt"), plain(srv.started_at)) +
+      row(t("row.uptime"), '<span class="uptime">' + esc(uptime(srv.uptime_s)) + "</span>") +
+      row(t("row.cwd"), plain(srv.cwd)) +
+      "</div>");
+
+    html += section(t("sec.configFile"), '<div class="rows">' +
+      row(t("row.path"), plain(cf.path)) +
+      row(t("row.modified"), plain(cf.mtime) + (cf.exists ? "" : ' <span class="tag warn">' + esc(t("tag.noFile")) + "</span>")) +
+      row(t("row.size"), esc(bytes(cf.size))) +
+      "</div>");
+
+    el("content-startup").innerHTML = html;
+    wireStartup();
+  }
+
+  /* ───────────────────────── 维护与诊断 ───────────────────────── */
+  function renderMaint() {
+    var m = data.maintenance || {};
+    var srv = data.server || {};
+    var rt = data.runtime || {};
+    var patches = data.patches || {};
+    var models = data.models || [];
+    var outs = m.outputs || {};
+    var stmFiles = m.stm_files || {};
+
+    var roles = {};
+    models.forEach(function (item) { roles[item.role] = item; });
+
+    var patchKeys = ["use_lama", "layer_fix_drop", "layer_fix_order"];
+    var patchDone = patchKeys.filter(function (k) { return patches[k]; }).length;
+
+    var stmKeys = Object.keys(stmFiles);
+    var stmOk = stmKeys.filter(function (k) { return stmFiles[k]; }).length;
+
+    var html = "";
+
+    html += section(t("sec.service"), '<div class="rows">' +
+      row(t("row.status"), '<span class="tag ok">' + esc(t("tag.running")) + '</span> <span class="dim">PID ' + esc(srv.pid) +
+          ' · ' + esc(t("row.uptime")) + ' <span class="uptime">' + esc(uptime(srv.uptime_s)) + "</span></span>") +
+      row(t("row.python"), plain(rt.python) + ' <span class="dim">' + esc(rt.executable || "") + "</span>") +
+      row("torch / CUDA", esc((rt.torch || "—") + " / " + (rt.cuda || "—"))) +
+      "</div>");
+
+    html += section(t("sec.integrity"), '<div class="rows">' +
+      row(t("row.venv"), tag(m.venv, t("tag.ready"), t("tag.venvMissing"))) +
+      row(t("row.stmCode"), tag(stmOk === stmKeys.length && stmKeys.length > 0,
+          stmOk + " / " + stmKeys.length, t("tag.stmMissing", { n: stmKeys.length - stmOk }))) +
+      row(t("row.modelLayer"), roles.layerdiff
+          ? '<span class="tag ok">' + esc(t("tag.present")) + '</span> <span class="dim">' + esc(roles.layerdiff.rel) + "</span>"
+          : '<span class="tag warn">' + esc(t("tag.missing")) + "</span>") +
+      row(t("row.modelDepth"), roles.depth
+          ? '<span class="tag ok">' + esc(t("tag.present")) + '</span> <span class="dim">' + esc(roles.depth.rel) + "</span>"
+          : '<span class="tag warn">' + esc(t("tag.missing")) + "</span>") +
+      row(t("row.patch"), tag(patchDone === patchKeys.length,
+          patchDone + " / " + patchKeys.length, patchDone + " / " + patchKeys.length)) +
+      "</div>");
+
+    html += section(t("sec.output"), '<div class="rows">' +
+      row(t("row.jobs"), esc(String(outs.jobs || 0))) +
+      row(t("row.space"), esc((outs.size_gb || 0) + " GB")) +
+      row(t("row.latest"), plain(outs.latest)) +
+      "</div>");
+
+    el("content-maint").innerHTML = html;
+  }
+
+  function renderAll() {
+    renderEnv();
+    renderStartup();
+    renderMaint();
+  }
+
+  /* ───────────────────────── 诊断文本 ───────────────────────── */
+  function diagnostics() {
+    if (!data) return "";
+    var hw = data.hardware || {};
+    var gpu = hw.gpu || {};
+    var rt = data.runtime || {};
+    var patches = data.patches || {};
+    var m = data.maintenance || {};
+    var srv = data.server || {};
+    return [
+      t("diag.title"),
+      "Python " + rt.python + " | torch " + rt.torch + " | CUDA " + (rt.cuda || "-"),
+      t("diag.gpu") + " " + (gpu.name || "-") + " | VRAM " + (gpu.memory_mb ? gb(gpu.memory_mb) : "-") +
+        " | " + t("row.driver") + " " + (gpu.driver || "-"),
+      t("diag.os") + " " + hw.os + " | CPU " + (hw.cpu || "-") + " | RAM " + (hw.ram_gb || "-") + " GB",
+      t("diag.extra") + " " + (rt.xformers || t("tag.notInstalled")) + " | triton " + (rt.triton || t("tag.notInstalled")),
+      t("diag.patch") + " use_lama=" + patches.use_lama + " layer_fix_drop=" + patches.layer_fix_drop +
+        " layer_fix_order=" + patches.layer_fix_order,
+      t("diag.models") + " " + (data.models || []).map(function (item) { return item.name + "(" + item.role + ")"; }).join(", "),
+      t("diag.hf") + " " + (hw.hf_endpoint || t("diag.auto")) +
+        (hw.hf_latency_ms != null ? " · " + hw.hf_latency_ms + " ms" : ""),
+      t("diag.listen") + " " + data.config.host + ":" + data.config.port + " | PID " + srv.pid +
+        " | " + t("row.uptime") + " " + uptime(srv.uptime_s),
+      t("diag.jobs") + " " + ((m.outputs || {}).jobs || 0) + " · " + ((m.outputs || {}).size_gb || 0) + " GB",
+      t("diag.disk") + " " + data.disk.free_gb + " GB / " + data.disk.total_gb + " GB",
+      t("row.components") + " " + ((data.components || {}).hf_home || "-") +
+        " (" + ((data.components || {}).source === "project" ? "project" : "user") +
+        ", " + ((data.components || {}).size_gb || 0) + " GB)",
+      t("diag.path") + " " + data.paths.root
+    ].join("\n");
+  }
+
+  /* ───────────────────────── 视图切换 ───────────────────────── */
+  var currentView = "env";
+
+  function showView(name) {
+    if (VIEWS.indexOf(name) < 0) name = "env";
+    currentView = name;
+    VIEWS.forEach(function (key) {
+      el("view-" + key).hidden = key !== name;
+    });
+    Array.prototype.forEach.call(el("railNav").querySelectorAll("a"), function (a) {
+      var on = a.dataset.view === name;
+      a.classList.toggle("active", on);
+      if (on) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+    });
+    document.title = t("title.page") + " · " + t("title." + name);
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+
+  function viewFromHash() { return (location.hash || "").replace("#", "") || "env"; }
+
+  /* ───────────────────────── 语言 ───────────────────────── */
+  function applyI18n() {
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+    Array.prototype.forEach.call(document.querySelectorAll("[data-i18n]"), function (node) {
+      node.textContent = t(node.dataset.i18n);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-i18n-html]"), function (node) {
+      node.innerHTML = t(node.dataset.i18nHtml);
+    });
+    var copy = el("copyBtn");
+    if (copy && !copy.dataset.busy) copy.textContent = t("btn.copy");
+    showView(viewFromHash());
+  }
+
+  function switchLang(next) {
+    lang = next === "en" ? "en" : "zh";
+    applyI18n();
+    if (data) renderAll();
+  }
+
+  window.addEventListener("storage", function (event) {
+    if (event.key !== LS_LANG && event.key !== null) return;
+    var next = localStorage.getItem(LS_LANG) === "en" ? "en" : "zh";
+    if (next !== lang) switchLang(next);
+  });
+
+  el("railNav").addEventListener("click", function (event) {
+    var link = event.target.closest("a");
+    if (!link) return;
+    event.preventDefault();
+    var name = link.dataset.view;
+    if (viewFromHash() === name) showView(name);
+    else location.hash = name;
+  });
+
+  window.addEventListener("hashchange", function () { showView(viewFromHash()); });
+
+  /* ───────────────────────── 复制诊断 / 打开目录 / 终端 ───────────────────────── */
+  el("copyBtn").addEventListener("click", function () {
+    var text = diagnostics();
+    if (!text) return;
+    var btn = el("copyBtn");
+    var done = function (label) {
+      btn.dataset.busy = "1";
+      btn.textContent = label;
+      setTimeout(function () { delete btn.dataset.busy; btn.textContent = t("btn.copy"); }, 1500);
+    };
+    navigator.clipboard.writeText(text).then(function () { done(t("btn.copied")); })
+      .catch(function () { done(t("btn.copyFail")); });
+  });
+
+  function syncTermButton() {
+    if (!el("termBtn")) return;
+    if (data && data.server && data.server.local_request === false) {
+      el("termBtn").disabled = true;
+      el("termBtn").title = t("err.localOnly", { action: t("btn.terminal") });
+    }
+  }
+
+  el("termBtn").addEventListener("click", function () {
+    var note = el("maintNote");
+    var map = {
+      local_only: t("err.localOnly", { action: t("btn.terminal") }),
+      unsupported: t("err.unsupported"),
+      missing_env_bat: t("err.missingEnvBat"),
+      spawn_failed: t("err.spawnFailed")
+    };
+    note.textContent = t("note.termSending");
+    fetch("/api/terminal", { method: "POST" })
+      .then(function (r) { return r.json(); })
+      .then(function (payload) {
+        note.textContent = payload && payload.ok
+          ? t("note.termOpened")
+          : t("note.termFail", { error: map[(payload || {}).error] || t("err.unknown") });
+      })
+      .catch(function () { note.textContent = t("note.noResponse"); });
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll(".actions [data-target]"), function (btn) {
+    btn.addEventListener("click", function () {
+      var note = el("maintNote");
+      note.textContent = t("note.opening");
+      fetch("/api/open-folder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: btn.dataset.target })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (payload) {
+          if (payload && payload.ok) {
+            note.textContent = t("note.opened", { path: payload.path });
+          } else {
+            var map = {
+              invalid_target: t("err.invalidTarget"),
+              not_found: t("err.notFound"),
+              open_failed: t("err.openFailed"),
+              local_only: t("err.localOnly", { action: t("btn.openOutputs") })
+            };
+            note.textContent = t("note.openFail", { error: map[(payload || {}).error] || t("err.unknown") });
+          }
+        })
+        .catch(function () { note.textContent = t("note.noResponse"); });
+    });
+  });
+
+  /* ───────────────────────── 启动 ───────────────────────── */
+  applyI18n();
+
+  fetch("/api/env")
+    .then(function (r) { return r.json(); })
+    .then(function (payload) {
+      data = payload;
+      renderAll();
+      startUptimeTick();
+      syncTermButton();
+    })
+    .catch(function () {
+      var failed = '<div class="rows"><p class="empty">' + esc(t("err.readFail")) + "</p></div>";
+      el("content").innerHTML = failed;
+      el("content-startup").innerHTML = failed;
+      el("content-maint").innerHTML = failed;
+    });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+SeeThrough-GGUF-Win
+Copyright 2026 Mingri196
+
+This product includes software developed as part of:
+
+  * see-through-gguf (STM)
+    https://github.com/IceFog72/see-through-gguf
+    Licensed under the Apache License, Version 2.0.
+
+  * See-through (shitagaki-lab/see-through)
+    https://github.com/shitagaki-lab/see-through
+    Paper: "See-through: Layer Decomposition for Live2D Character Animation"
+    https://arxiv.org/abs/2602.03749
+
+Modifications to the upstream code are documented in MODIFICATIONS.md:
+  - stm/common/utils/inference_utils.py
+  - stm/inference/scripts/inference_psd.py
+  - stm/common/utils/io_utils.py
+
+This repository contains code only. Model weights are downloaded separately by
+the user and are not distributed here. Third-party components and their licenses
+are listed in THIRD_PARTY_NOTICES.md.
+
+This project is not affiliated with, or endorsed by, the upstream authors.

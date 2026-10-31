@@ -1,0 +1,5 @@
+# SeeThrough-GGUF-Win 后端依赖（仅服务端本身）。
+# 注意：推理所需的 torch / diffusers / gguf 等重依赖由 STM 仓库的
+# requirements.txt 提供，并安装在同一个虚拟环境中（见 1-setup.bat）。
+flask>=3.0
+pillow>=10.0

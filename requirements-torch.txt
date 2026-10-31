@@ -1,0 +1,8 @@
+# PyTorch cu128（NVIDIA 显卡）
+# 注意：GTX 10 系是 Pascal（sm_61），torch 2.9+ 的 cu128 轮子已不再包含 sm_61，
+# 会报 "no kernel image is available for execution on the device"。
+# 2.8.0+cu128 的编译架构为 sm_61/70/75/80/86/90/100/120，是最后支持 GTX 10 系的版本。
+--index-url https://download.pytorch.org/whl/cu128
+
+torch==2.8.0
+torchvision==0.23.0

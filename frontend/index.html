@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light" />
+  <title>分层工作台 · SeeThrough GGUF</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="masthead">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">ST</span>
+      <div class="brand-copy">
+        <h1 data-i18n="app.title">分层工作台</h1>
+        <p data-i18n="app.tagline">单张角色图 → 图层 / 深度 / PSD</p>
+      </div>
+    </div>
+
+    <div class="masthead-right">
+      <div class="readout" id="modelReadout" role="status" aria-live="polite">
+        <span class="readout-dot" id="modelDot" data-state="checking"></span>
+        <span class="readout-text" id="modelText" data-i18n="model.checking">检查模型</span>
+        <button class="readout-more" id="modelMore" type="button" data-i18n="model.details">详情</button>
+      </div>
+      <div class="model-detail" id="modelDetail" hidden>
+        <dl id="modelList"></dl>
+      </div>
+      <button class="lang-btn" id="langBtn" type="button" aria-label="切换语言 / Switch language">
+        <span data-lang-opt="zh">CN</span>
+        <span data-lang-opt="en">EN</span>
+      </button>
+      <a class="settings-link" id="settingsLink" href="/settings" target="_blank" rel="noopener" data-i18n="action.settings">设置</a>
+    </div>
+  </header>
+
+  <div class="notice" id="notice" hidden>
+    <span class="notice-tag" id="noticeTag"></span>
+    <p class="notice-msg" id="noticeMsg"></p>
+    <button class="notice-close" id="noticeClose" type="button" aria-label="关闭 / Close">×</button>
+  </div>
+
+  <main class="bench">
+    <!-- ───────────────────────── 工序轨道 ───────────────────────── -->
+    <aside class="rail" aria-label="操作流程">
+      <!-- 01 图像 -->
+      <section class="step" data-step="image">
+        <header class="step-head">
+          <span class="step-no">01</span>
+          <h2 data-i18n="step.image">图像</h2>
+          <span class="step-hint" data-i18n="step.imageHint">单张</span>
+        </header>
+
+        <div class="drop" id="drop" tabindex="0" role="button" aria-describedby="dropHint">
+          <div class="drop-inner" id="dropInner">
+            <span class="drop-glyph" aria-hidden="true"></span>
+            <p class="drop-title" data-i18n="file.drop">拖入图片，或点击选择</p>
+            <p class="drop-hint" id="dropHint" data-i18n="file.hint">PNG · JPG · WEBP · BMP，单张最大 50 MB</p>
+          </div>
+          <img class="drop-preview" id="dropPreview" alt="" hidden />
+        </div>
+        <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp,image/bmp" hidden />
+
+        <div class="file-card" id="fileCard" hidden>
+          <img class="file-thumb" id="fileThumb" alt="" />
+          <div class="file-copy">
+            <p class="file-name" id="fileName"></p>
+            <p class="file-spec" id="fileSpec"></p>
+          </div>
+          <button class="ghost-btn" id="fileRemove" type="button" data-i18n="file.remove">移除</button>
+        </div>
+        <p class="field-error" id="fileError" hidden></p>
+      </section>
+
+      <!-- 02 参数 -->
+      <section class="step" data-step="params">
+        <header class="step-head">
+          <span class="step-no">02</span>
+          <h2 data-i18n="step.params">参数</h2>
+          <span class="step-hint" data-i18n="step.paramsHint">分辨率与采样</span>
+        </header>
+
+        <div class="field">
+          <div class="field-row field-row-split">
+            <label class="field-cell">
+              <span class="field-label" data-i18n="field.width">宽</span>
+              <input type="number" id="width" inputmode="numeric" />
+            </label>
+            <span class="aspect-mark" aria-hidden="true">×</span>
+            <label class="field-cell">
+              <span class="field-label" data-i18n="field.height">高</span>
+              <input type="number" id="height" inputmode="numeric" />
+            </label>
+          </div>
+          <p class="field-note" data-i18n="field.squareNote">引擎按正方形推理，宽高同步；需为 64 的倍数</p>
+          <p class="field-error" id="resError" hidden></p>
+        </div>
+
+        <div class="field">
+          <div class="field-row">
+            <label class="field-label" for="steps" data-i18n="field.steps">推理步数</label>
+            <input type="number" id="steps" class="num" inputmode="numeric" />
+            <span class="field-suffix" id="stepsRangeLabel">1–150</span>
+          </div>
+          <input type="range" id="stepsRange" class="range" />
+          <p class="field-error" id="stepsError" hidden></p>
+        </div>
+
+        <div class="field">
+          <span class="field-label" data-i18n="field.seed">种子</span>
+          <div class="segmented" id="seedMode" role="radiogroup" data-i18n-aria="field.seed" aria-label="种子">
+            <button type="button" role="radio" data-mode="fixed" aria-checked="true" data-i18n="field.seedFixed">固定</button>
+            <button type="button" role="radio" data-mode="random" aria-checked="false" data-i18n="field.seedRandom">随机</button>
+          </div>
+          <div class="field-row">
+            <input type="number" id="seed" class="num wide" inputmode="numeric" data-i18n-aria="field.seed" aria-label="种子" />
+            <button class="ghost-btn icon" id="seedDice" type="button" data-i18n-aria="field.seedDice" aria-label="随机种子" title="随机种子">
+              <span aria-hidden="true">↻</span>
+            </button>
+          </div>
+          <p class="field-note" id="seedNote" data-i18n="field.seedFixedNote">固定种子可复现同一结果</p>
+          <p class="field-error" id="seedError" hidden></p>
+        </div>
+
+        <div class="field parts">
+          <div class="parts-head">
+            <span class="field-label" data-i18n="field.parts">输出图层</span>
+          </div>
+          <p class="field-note" data-i18n="field.partsNote">默认全选；取消勾选的图层不会生成，也不会进 PSD</p>
+          <div class="parts-actions">
+            <button class="ghost-btn mini" type="button" id="partsAll" data-i18n="action.partsAll">全选</button>
+            <button class="ghost-btn mini" type="button" id="partsNone" data-i18n="action.partsNone">清空</button>
+            <button class="ghost-btn mini" type="button" id="partsBody" data-i18n="action.partsBody">仅身体组</button>
+            <button class="ghost-btn mini" type="button" id="partsHead" data-i18n="action.partsHead">仅头部组</button>
+          </div>
+          <div class="parts-group">
+            <div class="parts-group-head">
+              <b data-i18n="parts.body">身体组</b>
+              <span class="parts-count" id="partsBodyCount">13 / 13</span>
+              <small data-i18n="parts.bodyNote">始终整组参与采样，改这里只影响落盘</small>
+            </div>
+            <div class="parts-chips" id="partsBodyChips"></div>
+          </div>
+          <div class="parts-group">
+            <div class="parts-group-head">
+              <b data-i18n="parts.head">头部组</b>
+              <span class="parts-count" id="partsHeadCount">11 / 11</span>
+              <small data-i18n="parts.headNote">整组跳过，省最多时间</small>
+            </div>
+            <div class="parts-chips" id="partsHeadChips"></div>
+          </div>
+          <div class="parts-foot">
+            <span class="parts-count" id="partsSelected">已选 24 / 24</span>
+          </div>
+          <p class="field-error" id="partsError" hidden></p>
+        </div>
+
+        <div class="switches">
+          <label class="switch">
+            <input type="checkbox" id="tblrSplit" checked />
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-copy">
+              <b data-i18n="toggle.tblr">左右对称分割</b>
+              <small>tblr_split</small>
+            </span>
+          </label>
+
+          <label class="switch" id="lamaSwitch">
+            <input type="checkbox" id="useLama" checked />
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-copy">
+              <b data-i18n="toggle.lama">LaMa 修补</b>
+              <small id="lamaNote">use_lama</small>
+            </span>
+          </label>
+
+          <label class="switch">
+            <input type="checkbox" id="layerFix" checked />
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-copy">
+              <b data-i18n="toggle.layerFix">图层修补</b>
+              <small data-i18n="toggle.layerFixNote">修贴边图层被丢、眼白盖住虹膜</small>
+            </span>
+          </label>
+
+          <label class="switch">
+            <input type="checkbox" id="savePsd" checked />
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-copy">
+              <b data-i18n="toggle.psd">导出 PSD</b>
+              <small>save_to_psd</small>
+            </span>
+          </label>
+        </div>
+
+        <details class="adv">
+          <summary data-i18n="adv.title">高级选项</summary>
+
+          <label class="switch">
+            <input type="checkbox" id="quantized" checked />
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-copy">
+              <b data-i18n="toggle.quantized">GGUF 量化 + 流式加载</b>
+              <small data-i18n="toggle.quantizedNote">关闭后整份权重进显存，6 GB 卡易 OOM</small>
+            </span>
+          </label>
+
+          <div class="field tight">
+            <div class="field-row">
+              <label class="field-label" for="depthSteps" data-i18n="field.depth">深度步数</label>
+              <span class="field-suffix" data-i18n="field.depthNote">4 为默认</span>
+            </div>
+            <select id="depthSteps" class="select-wide">
+              <option value="-1" data-i18n="field.depthAuto">自动</option>
+              <option value="2">2</option>
+              <option value="4">4</option>
+              <option value="8">8</option>
+              <option value="12">12</option>
+            </select>
+          </div>
+
+          <div class="field tight">
+            <div class="field-row">
+              <label class="field-label" for="depthResMode" data-i18n="field.depthRes">深度分辨率</label>
+              <span class="field-suffix" id="depthResHint" data-i18n="field.depthResAutoHint">按显存自动</span>
+            </div>
+            <select id="depthResMode" class="select-wide">
+              <option value="auto" data-i18n="field.depthResAuto">自动</option>
+              <option value="-1" data-i18n="field.depthResFollow">跟随主分辨率</option>
+              <option value="custom" data-i18n="field.depthResCustom">自定义</option>
+            </select>
+            <div class="field-row" id="depthResRow" hidden>
+              <input type="number" id="depthRes" class="num wide" inputmode="numeric" />
+            </div>
+            <p class="field-error" id="depthResError" hidden></p>
+          </div>
+
+          <div class="field tight">
+            <div class="field-row">
+              <label class="field-label" for="maskResMode" data-i18n="field.maskRes">前景分割分辨率</label>
+              <span class="field-suffix" data-i18n="field.maskResNote">(仅对无透明通道的图生效)</span>
+            </div>
+            <select id="maskResMode" class="select-wide">
+              <option value="auto" data-i18n="field.maskResAuto">自动</option>
+              <option value="custom" data-i18n="field.maskResCustom">自定义</option>
+            </select>
+            <div class="field-row" id="maskResRow" hidden>
+              <input type="number" id="maskRes" class="num wide" inputmode="numeric" />
+            </div>
+            <p class="field-error" id="maskResError" hidden></p>
+          </div>
+
+          <div class="field tight">
+            <div class="field-row">
+              <label class="field-label" data-i18n="field.attn">注意力后端</label>
+              <span class="field-suffix" id="attnHint">native 最稳</span>
+            </div>
+            <div class="segmented" id="attnBackend" role="radiogroup" aria-label="注意力后端">
+              <button type="button" role="radio" data-value="native" aria-checked="true">native</button>
+              <button type="button" role="radio" data-value="xformers" aria-checked="false">xformers</button>
+            </div>
+            <p class="field-error" id="attnError" hidden></p>
+          </div>
+
+          <label class="switch">
+            <input type="checkbox" id="ragdoll" />
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-copy">
+              <b data-i18n="toggle.ragdoll">骨骼切割</b>
+              <small data-i18n="toggle.ragdollNote">RTMPose 肢体分层，首次需下载姿态模型</small>
+            </span>
+          </label>
+
+          <div class="field tight">
+            <div class="field-row">
+              <label class="field-label" for="ragdollConf" data-i18n="toggle.confidence">骨骼置信度</label>
+              <output class="num out" id="ragdollConfOut">0.30</output>
+            </div>
+            <input type="range" id="ragdollConf" class="range" min="0.05" max="0.95" step="0.05" value="0.3" />
+          </div>
+
+          <div class="field tight">
+            <div class="field-row">
+              <label class="field-label" for="ragdollOverlap" data-i18n="toggle.overlap">关节重叠</label>
+              <output class="num out" id="ragdollOverlapOut">0.20</output>
+            </div>
+            <input type="range" id="ragdollOverlap" class="range" min="0" max="0.5" step="0.05" value="0.2" />
+          </div>
+
+          <label class="switch">
+            <input type="checkbox" id="cutImages" checked />
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-copy">
+              <b data-i18n="toggle.cut">保留切图与骨架清单</b>
+              <small data-i18n="toggle.cutNote">输出 cuts/ 目录与 manifest.json（轴心、骨骼、父子关系）</small>
+            </span>
+          </label>
+        </details>
+      </section>
+
+
+      <!-- 03 模型选择 -->
+      <section class="step" data-step="models">
+        <header class="step-head">
+          <span class="step-no">03</span>
+          <h2 data-i18n="step.models">模型选择</h2>
+          <button class="ghost-btn mini" id="modelRescan" type="button" data-i18n="action.rescan">重新扫描</button>
+        </header>
+
+        <div class="field">
+          <div class="field-row">
+            <label class="field-label" for="layerModel" data-i18n="field.layerModel">图层模型</label>
+            <span class="field-suffix" id="layerModelSize"></span>
+          </div>
+          <select id="layerModel" class="select-wide"></select>
+          <p class="field-error" id="layerModelError" hidden></p>
+        </div>
+
+        <div class="field">
+          <div class="field-row">
+            <label class="field-label" for="depthModel" data-i18n="field.depthModel">深度模型</label>
+            <span class="field-suffix" id="depthModelSize"></span>
+          </div>
+          <select id="depthModel" class="select-wide"></select>
+          <p class="field-error" id="depthModelError" hidden></p>
+        </div>
+
+        <p class="field-note" id="modelsNote" data-i18n="models.note">扫描 models/ 及其子目录；子目录按完整路径显示。</p>
+
+        <div class="switches">
+          <label class="switch" id="keepModelSwitch">
+            <input type="checkbox" id="keepModel" checked />
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-copy">
+              <b data-i18n="keep.label">模型常驻</b>
+              <small data-i18n="keep.note">任务结束后保留模型，下一轮免加载</small>
+            </span>
+          </label>
+
+          <label class="switch">
+            <input type="checkbox" id="groupOffload" />
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-copy">
+              <b data-i18n="keep.offload">分组卸载</b>
+              <small data-i18n="keep.offloadNote">按组在 CPU / GPU 间搬权重，更省显存但更慢</small>
+            </span>
+          </label>
+        </div>
+      </section>
+
+      <!-- 04 运行 -->
+      <section class="step step-run" data-step="run">
+        <header class="step-head">
+          <span class="step-no">04</span>
+          <h2 data-i18n="step.run">运行</h2>
+          <span class="step-hint" id="runState" data-i18n="status.ready">就绪</span>
+        </header>
+
+        <div class="run-actions">
+          <button class="run-btn" id="runBtn" type="button" disabled>
+            <span class="run-label" data-i18n="action.run">开始分解</span>
+            <span class="run-spin" aria-hidden="true"></span>
+          </button>
+          <button class="cancel-btn" id="cancelBtn" type="button" hidden data-i18n="action.cancel">取消</button>
+        </div>
+
+        <dl class="run-facts">
+          <div><dt data-i18n="run.res">分辨率</dt><dd id="factRes">—</dd></div>
+          <div><dt data-i18n="run.steps">步数</dt><dd id="factSteps">—</dd></div>
+          <div><dt data-i18n="run.seed">种子</dt><dd id="factSeed">—</dd></div>
+          <div><dt data-i18n="run.elapsed">耗时</dt><dd id="factElapsed">—</dd></div>
+        </dl>
+      </section>
+    </aside>
+
+    <div class="splitter splitter-v" id="splitterV" role="separator" aria-orientation="vertical"
+         tabindex="0" data-i18n-aria="split.rail" aria-label="调整参数栏宽度"></div>
+
+    <!-- ───────────────────────── 成像台 ───────────────────────── -->
+    <section class="stage" aria-label="结果与日志">
+      <header class="stage-head">
+        <h2 data-i18n="stage.title">成像台</h2>
+        <span class="stage-sub" id="stageSub" data-i18n="stage.sub">推理结果与图层下载</span>
+        <div class="stage-tools" id="stageTools" hidden>
+          <button class="ghost-btn mini" id="postBtn" type="button" aria-expanded="false" data-i18n="action.post">后处理重跑</button>
+          <div class="post-pop" id="postPop" hidden>
+            <div class="post-head">
+              <b data-i18n="action.post">后处理重跑</b>
+              <small data-i18n="post.hint">不重跑采样，约 1–3 分钟</small>
+            </div>
+            <div class="post-opts">
+              <label><input type="checkbox" id="postTblr" checked /><span data-i18n="toggle.tblr">左右对称分割</span></label>
+              <label><input type="checkbox" id="postRagdoll" /><span data-i18n="toggle.ragdoll">骨骼切割</span></label>
+              <label><input type="checkbox" id="postPsd" checked /><span data-i18n="toggle.psd">导出 PSD</span></label>
+              <label><input type="checkbox" id="postCut" checked /><span data-i18n="toggle.cut">保留切图与骨架清单</span></label>
+            </div>
+            <div class="post-range">
+              <span data-i18n="toggle.confidence">骨骼置信度</span>
+              <input type="range" id="postConf" min="0.05" max="0.95" step="0.05" value="0.3" />
+              <output id="postConfOut">0.30</output>
+            </div>
+            <div class="post-range">
+              <span data-i18n="toggle.overlap">关节重叠</span>
+              <input type="range" id="postOverlap" min="0" max="0.5" step="0.05" value="0.2" />
+              <output id="postOverlapOut">0.20</output>
+            </div>
+            <div class="post-foot">
+              <button class="post-start" id="postStart" type="button" data-i18n="action.postStart">开始</button>
+              <span class="post-status" id="postStatus"></span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div class="stage-body" id="stageBody">
+        <div class="stage-empty" id="stageEmpty">
+          <p class="empty-title" data-i18n="stage.empty">还没有结果</p>
+          <p class="empty-hint" data-i18n="stage.emptyHint">上传一张角色图，点击「开始分解」</p>
+        </div>
+
+        <div class="stage-running" id="stageRunning" hidden>
+          <div class="pulse" aria-hidden="true"><span></span><span></span><span></span></div>
+          <p class="running-title" id="runningTitle" data-i18n="stage.running">正在推理</p>
+          <p class="running-hint" data-i18n="stage.runningHint">低显存设备上可能需要十几分钟，可随时取消</p>
+        </div>
+
+        <div class="stage-failed" id="stageFailed" hidden>
+          <p class="failed-title" id="failedTitle" data-i18n="stage.failed">本次任务未完成</p>
+          <p class="failed-hint" id="failedHint"></p>
+        </div>
+
+        <div class="results" id="results" hidden>
+          <div class="psd-bar" id="psdBar" hidden>
+            <span class="psd-label" data-i18n="stage.psd">PSD</span>
+            <div class="psd-files" id="psdFiles"></div>
+          </div>
+          <div class="psd-bar" id="metaBar" hidden>
+            <span class="psd-label" data-i18n="stage.meta">清单</span>
+            <div class="psd-files" id="metaFiles"></div>
+          </div>
+          <div class="pose-strip" id="poseStrip" hidden>
+            <span class="pose-label" data-i18n="stage.pose">关节置信度</span>
+            <div class="pose-list" id="poseList"></div>
+          </div>
+          <div class="tiles" id="tiles"></div>
+        </div>
+      </div>
+
+      <div class="splitter splitter-h" id="splitterH" role="separator" aria-orientation="horizontal"
+           tabindex="0" data-i18n-aria="split.log" aria-label="调整日志高度"></div>
+
+      <section class="console" aria-label="运行日志">
+        <header class="console-head">
+          <h3 data-i18n="log.title">运行日志</h3>
+          <span class="console-count" id="logCount">0</span>
+          <div class="console-tools">
+            <label class="mini-check">
+              <input type="checkbox" id="logFollow" checked />
+              <span data-i18n="log.follow">跟随</span>
+            </label>
+            <button class="mini-btn" id="logClear" type="button" data-i18n="log.clear">清空</button>
+          </div>
+        </header>
+        <div class="console-body" id="logBody" role="log" aria-live="polite" aria-relevant="additions">
+          <p class="console-idle" id="logIdle" data-i18n="log.empty">等待任务开始</p>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <template id="tplTile">
+    <figure class="tile">
+      <a class="tile-link" target="_blank" rel="noopener">
+        <img class="tile-img" loading="lazy" alt="" />
+      </a>
+      <figcaption class="tile-meta">
+        <span class="tile-name"></span>
+        <span class="tile-size"></span>
+        <a class="tile-dl" data-i18n="action.download">下载</a>
+      </figcaption>
+    </figure>
+  </template>
+
+  <script src="/vendor/gsap.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

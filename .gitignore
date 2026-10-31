@@ -1,0 +1,50 @@
+# 虚拟环境：不可移植，必须用 1-setup.bat 在本地重建
+.venv/
+venv/
+
+# 可选二进制依赖（xformers / triton 等）：正常会装进 .venv，已被上一行忽略；
+# 万一手滑装到仓库根目录也不要入库——它们是按本机 torch / CUDA 编译的二进制。
+xformers/
+triton/
+triton_windows/
+*.whl
+
+# 模型权重：体积大，且许可独立于本仓库
+models/*.gguf
+models/**/*.gguf
+
+# 运行产物（用户上传的原图、图层 PNG、PSD、cuts/、pose_keypoints.json 等）
+outputs/
+
+# 首次推理的辅助组件（HF / torch.hub），首次 run 1-setup.bat 时自动创建
+components/
+*.psd
+
+# 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.cache/
+.uv-cache/
+*.log
+
+# 临时文件与备份（config.json.bak、补丁 .bak、写入时的 .tmp）
+*.bak
+*.tmp
+_tmpverify/
+
+# 打包产物
+build/
+dist/
+*.egg-info/
+
+# 系统与编辑器
+Thumbs.db
+desktop.ini
+.DS_Store
+.idea/
+.vscode/

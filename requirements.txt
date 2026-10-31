@@ -1,0 +1,8 @@
+# SeeThrough-GGUF-Win 运行依赖（Python 3.12，PyPI）
+# PyTorch 单独安装：见 requirements-torch.txt（cu128 专用索引，避免与 PyPI 混源）
+
+# STM 推理依赖
+-r stm/requirements.txt
+
+# Web 后端
+-r backend/requirements.txt

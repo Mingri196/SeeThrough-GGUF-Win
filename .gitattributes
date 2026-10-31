@@ -1,0 +1,11 @@
+* text=auto
+
+# Windows 批处理用 CRLF，避免在部分环境下 cmd 解析异常
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制资源
+*.png binary
+*.jpg binary
+*.gguf binary
+*.psd binary
