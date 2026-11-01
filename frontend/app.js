@@ -17,6 +17,8 @@
       "model.ready": "模型就绪",
       "model.missing": "模型缺失",
       "model.details": "详情",
+      "sys.note": "每 2 s 刷新",
+      "sys.aria": "系统资源",
       "model.layerdiff": "LayerDiff3D",
       "model.depth": "Marigold3D",
       "model.stm": "STM 仓库",
@@ -222,6 +224,8 @@
       "model.ready": "Models ready",
       "model.missing": "Models missing",
       "model.details": "Details",
+      "sys.note": "refreshed every 2 s",
+      "sys.aria": "System resources",
       "model.layerdiff": "LayerDiff3D",
       "model.depth": "Marigold3D",
       "model.stm": "STM repo",
@@ -443,6 +447,152 @@
   /* ────────────────────────────── 状态 ────────────────────────────── */
 
   const el = (id) => document.getElementById(id);
+
+  /* ─────────────────────────── 系统资源读数 ─────────────────────────── */
+  /* 顶栏四格：GPU / 显存 / 内存 / CPU。后端 1 s 采样一次进缓存，
+     这里 2 s 拉一次；页签不可见时停掉轮询，避免后台白跑。 */
+
+  const SYS_INTERVAL = 2000;
+  let sysTimer = null;
+  let sysBusy = false;
+
+  // 长型号压短名：AMD Ryzen 9 7950X3D 16-Core → R9 7950X3D，13th Gen … i7-13700K → i7-13700K
+  function shortCpu(name) {
+    if (!name) return "CPU";
+    const clean = String(name)
+      .replace(/\((R|TM|tm)\)/g, " ")
+      .replace(/\bCPU\b|\bPROCESSOR\b/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    let m = /Ryzen\s+([3579])\s+([A-Za-z0-9]+)/i.exec(clean);
+    if (m) return "R" + m[1] + " " + m[2].toUpperCase();
+    m = /(i[3579])-([A-Za-z0-9]+)/i.exec(clean);
+    if (m) return m[1].toLowerCase() + "-" + m[2].toUpperCase();
+    m = /Ultra\s+([579])\s+([A-Za-z0-9]+)/i.exec(clean);
+    if (m) return "Ultra " + m[1] + " " + m[2].toUpperCase();
+    m = /(Xeon|Threadripper)[^A-Za-z0-9]*([A-Za-z0-9-]+)/i.exec(clean);
+    if (m) return /Threadripper/i.test(m[1]) ? "TR " + m[2] : "Xeon " + m[2];
+    return clean.split(" ").slice(-2).join(" ");
+  }
+
+  // nvidia-smi 给的是「NVIDIA GeForce RTX 3060 Laptop GPU」，顶栏只留代号
+  function shortGpu(name) {
+    if (!name) return "GPU";
+    return String(name)
+      .replace(/^NVIDIA\s+/i, "")
+      .replace(/\s*GeForce\s*/i, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function sysLevel(pct) {
+    if (pct >= 95) return "crit";
+    if (pct >= 85) return "high";
+    if (pct >= 60) return "mid";
+    return "low";
+  }
+
+  function paintSysMetric(key, pct, sub) {
+    const node = document.querySelector('.sys-metric[data-metric="' + key + '"]');
+    if (!node) return;
+    const subNode = node.querySelector(".sys-s");
+    // 取不到数（没装 psutil / 驱动不支持）就显示占位横杠，别假装是 0%
+    if (pct == null || Number.isNaN(Number(pct))) {
+      node.dataset.level = "low";
+      node.querySelector(".sys-v").textContent = "–";
+      node.querySelector(".sys-b").style.width = "0%";
+      if (subNode) {
+        if (subNode.textContent !== sub) subNode.textContent = sub;
+        subNode.title = sub;
+      }
+      return;
+    }
+
+    const value = Math.max(0, Math.min(100, Number(pct)));
+    node.dataset.level = sysLevel(value);
+    node.querySelector(".sys-v").textContent = Math.round(value);
+    node.querySelector(".sys-b").style.width = value.toFixed(1) + "%";
+    if (subNode) {
+      if (subNode.textContent !== sub) subNode.textContent = sub;
+      subNode.title = sub;
+    }
+  }
+
+  function renderSys(data) {
+    const box = el("sysMetrics");
+    if (!box || !data) return;
+
+    const gpu = data.gpu || null;
+    const mem = data.mem || {};
+    const cpu = data.cpu || {};
+
+    // 三样都取不到（没 N 卡又没 psutil）才整组隐藏
+    if (!gpu && cpu.pct == null && mem.pct == null) {
+      box.hidden = true;
+      return;
+    }
+    box.hidden = false;
+
+    // 非 N 卡机器（AMD / Intel 核显）没有 nvidia-smi，只隐藏 GPU 与显存两格，
+    // CPU 和内存照常显示——不然这两项也跟着消失，等于什么都没给。
+    document
+      .querySelectorAll('.sys-metric[data-metric="gpu"], .sys-metric[data-metric="vram"]')
+      .forEach((node) => {
+        node.hidden = !gpu;
+      });
+
+    if (gpu) {
+      const vramPct = gpu.vram_total_gb ? (gpu.vram_used_gb / gpu.vram_total_gb) * 100 : 0;
+      const gpuSub =
+        gpu.temp != null ? shortGpu(gpu.name) + " · " + gpu.temp + "°C" : shortGpu(gpu.name);
+      paintSysMetric("gpu", gpu.util, gpuSub);
+      paintSysMetric(
+        "vram",
+        vramPct,
+        gpu.vram_used_gb.toFixed(1) + " / " + gpu.vram_total_gb.toFixed(1) + " GB"
+      );
+    }
+
+    paintSysMetric(
+      "mem",
+      mem.pct,
+      mem.used_gb != null ? mem.used_gb.toFixed(1) + " / " + mem.total_gb.toFixed(1) + " GB" : ""
+    );
+
+    paintSysMetric("cpu", cpu.pct, shortCpu(cpu.name));
+  }
+
+  async function pollSys() {
+    if (sysBusy) return;
+    sysBusy = true;
+    try {
+      const res = await fetch("/api/system", { cache: "no-store" });
+      if (res.ok) renderSys(await res.json());
+    } catch (err) {
+      /* 读数是辅助信息，取不到就保持现状，不弹提示 */
+    } finally {
+      sysBusy = false;
+    }
+  }
+
+  function sysStop() {
+    if (sysTimer) {
+      clearInterval(sysTimer);
+      sysTimer = null;
+    }
+  }
+
+  function sysStart() {
+    sysStop();
+    if (document.hidden) return;
+    pollSys();
+    sysTimer = setInterval(pollSys, SYS_INTERVAL);
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) sysStop();
+    else sysStart();
+  });
 
   const state = {
     config: null,
@@ -2342,6 +2492,7 @@
       });
 
     initSplitters();
+    sysStart();
     introMotion();
   }
 

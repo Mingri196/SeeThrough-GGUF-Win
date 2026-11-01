@@ -1168,6 +1168,123 @@ def _cpu_name() -> str | None:
         return None
 
 
+# ---------------------------------------------------------------------------
+# 系统资源读数（顶栏四格）
+# ---------------------------------------------------------------------------
+# nvidia-smi 每次都要起子进程（首次约 0.5 s、之后约 0.07 s），不能放在请求里同步跑。
+# 后台线程每秒采一次写进缓存，/api/system 只吐缓存；前端每 2 s 轮询一次。
+# 这四项只是给用户看的参考，任何一步失败都不应影响推理主流程。
+
+_SYS_LOCK = threading.Lock()
+_SYS_START_LOCK = threading.Lock()
+_SYS_SNAPSHOT: dict | None = None
+_SYS_THREAD: threading.Thread | None = None
+_SYS_HW: dict = {"gpu": None, "cpu": None}
+
+
+def _sys_query_gpu() -> dict | None:
+    """一次 nvidia-smi 取全利用率 / 显存 / 温度；没有 N 卡时返回 None。"""
+    try:
+        out = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=4,
+            check=False,
+        )
+        line = (out.stdout or "").strip().splitlines()[0]
+        name, util, used, total, temp = [part.strip() for part in line.split(",")]
+        temp = temp.replace(".", "")
+        return {
+            "name": name,
+            "util": int(float(util)),
+            "vram_used_gb": round(float(used) / 1024, 2),
+            "vram_total_gb": round(float(total) / 1024, 2),
+            # 部分驱动不支持温度查询，返回 [N/A]
+            "temp": int(float(temp)) if temp.isdigit() else None,
+        }
+    except Exception:
+        return None
+
+
+def _sys_collect() -> dict:
+    gpu = _sys_query_gpu()
+    cpu_pct = None
+    mem_used = None
+    mem_total = None
+    try:
+        import psutil
+
+        cpu_pct = round(psutil.cpu_percent(interval=None), 1)
+        vm = psutil.virtual_memory()
+        mem_total = round(vm.total / 1024**3, 1)
+        # Windows 上 used 把 standby 也算进去，用 total - available 才贴近任务管理器
+        mem_used = round((vm.total - vm.available) / 1024**3, 1)
+    except Exception:
+        pass
+
+    if mem_total is None:
+        mem_total = _total_ram_gb()
+    mem_pct = round(mem_used / mem_total * 100, 1) if (mem_used is not None and mem_total) else None
+
+    return {
+        "ts": time.time(),
+        "gpu": gpu,
+        "cpu": {"name": _SYS_HW.get("cpu") or _cpu_name(), "pct": cpu_pct},
+        "mem": {"used_gb": mem_used, "total_gb": mem_total, "pct": mem_pct},
+    }
+
+
+def _sys_sampler() -> None:
+    global _SYS_SNAPSHOT
+    # cpu_percent(interval=None) 首次调用恒为 0（没有上一次采样做差），先空跑一次预热
+    try:
+        import psutil
+
+        psutil.cpu_percent(interval=None)
+    except Exception:
+        pass
+
+    while True:
+        try:
+            snap = _sys_collect()
+            with _SYS_LOCK:
+                _SYS_SNAPSHOT = snap
+        except Exception:
+            pass
+        time.sleep(1.0)
+
+
+def _sys_start() -> None:
+    """懒启动：第一次请求 /api/system 时才拉起采样线程，并同步采一次保证首屏有数。"""
+    global _SYS_THREAD, _SYS_SNAPSHOT
+    with _SYS_START_LOCK:
+        if _SYS_THREAD is not None:
+            return
+        _SYS_HW["cpu"] = _cpu_name()
+        # psutil 的 cpu_percent 靠两次采样做差，刚预热完就立刻取会拿到 0.0，
+        # 稍等一拍再采，首屏才不会显示一个假的 0%
+        try:
+            import psutil
+
+            psutil.cpu_percent(interval=None)
+            time.sleep(0.15)
+        except Exception:
+            pass
+        try:
+            first = _sys_collect()
+            _SYS_SNAPSHOT = first
+            _SYS_HW["gpu"] = (first.get("gpu") or {}).get("name")
+        except Exception:
+            _SYS_SNAPSHOT = None
+        _SYS_THREAD = threading.Thread(target=_sys_sampler, name="sys-sampler", daemon=True)
+        _SYS_THREAD.start()
+
+
 def _hf_latency() -> int | None:
     """启动时网络探测记录下来的握手耗时（毫秒）。"""
     info = NETWORK_INFO or {}
@@ -1472,6 +1589,18 @@ def api_env():
             },
         }
     )
+
+
+@app.route("/api/system")
+def api_system():
+    """顶栏资源读数。只吐后台线程的缓存，接口本身不跑 nvidia-smi。"""
+    _sys_start()
+    with _SYS_LOCK:
+        snap = _SYS_SNAPSHOT
+    payload: dict = {"ok": True, "ready": bool(snap)}
+    if snap:
+        payload.update(snap)
+    return jsonify(payload)
 
 
 @app.route("/api/config")
