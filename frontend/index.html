@@ -125,35 +125,41 @@
           <p class="field-error" id="seedError" hidden></p>
         </div>
 
-        <div class="field parts">
+        <div class="field parts" id="partsField">
           <div class="parts-head">
             <span class="field-label" data-i18n="field.parts">输出图层</span>
+            <button class="parts-toggle" id="partsToggle" type="button" aria-expanded="false" aria-controls="partsPanel">
+              <span id="partsToggleLabel">展开</span>
+              <span class="parts-toggle-arrow" aria-hidden="true">▾</span>
+            </button>
           </div>
-          <p class="field-note" data-i18n="field.partsNote">默认全选；取消勾选的图层不会生成，也不会进 PSD</p>
-          <div class="parts-actions">
-            <button class="ghost-btn mini" type="button" id="partsAll" data-i18n="action.partsAll">全选</button>
-            <button class="ghost-btn mini" type="button" id="partsNone" data-i18n="action.partsNone">清空</button>
-            <button class="ghost-btn mini" type="button" id="partsBody" data-i18n="action.partsBody">仅身体组</button>
-            <button class="ghost-btn mini" type="button" id="partsHead" data-i18n="action.partsHead">仅头部组</button>
-          </div>
-          <div class="parts-group">
-            <div class="parts-group-head">
-              <b data-i18n="parts.body">身体组</b>
-              <span class="parts-count" id="partsBodyCount">13 / 13</span>
-              <small data-i18n="parts.bodyNote">始终整组参与采样，改这里只影响落盘</small>
+          <div class="parts-body" id="partsPanel" hidden>
+            <p class="field-note" data-i18n="field.partsNote">默认全选；取消勾选的图层不会生成，也不会进 PSD</p>
+            <div class="parts-actions">
+              <button class="ghost-btn mini" type="button" id="partsAll" data-i18n="action.partsAll">全选</button>
+              <button class="ghost-btn mini" type="button" id="partsNone" data-i18n="action.partsNone">清空</button>
+              <button class="ghost-btn mini" type="button" id="partsBody" data-i18n="action.partsBody">仅身体组</button>
+              <button class="ghost-btn mini" type="button" id="partsHead" data-i18n="action.partsHead">仅头部组</button>
             </div>
-            <div class="parts-chips" id="partsBodyChips"></div>
-          </div>
-          <div class="parts-group">
-            <div class="parts-group-head">
-              <b data-i18n="parts.head">头部组</b>
-              <span class="parts-count" id="partsHeadCount">11 / 11</span>
-              <small data-i18n="parts.headNote">整组跳过，省最多时间</small>
+            <div class="parts-group">
+              <div class="parts-group-head">
+                <b data-i18n="parts.body">身体组</b>
+                <span class="parts-count" id="partsBodyCount">13 / 13</span>
+                <small data-i18n="parts.bodyNote">始终整组参与采样，改这里只影响落盘</small>
+              </div>
+              <div class="parts-chips" id="partsBodyChips"></div>
             </div>
-            <div class="parts-chips" id="partsHeadChips"></div>
-          </div>
-          <div class="parts-foot">
-            <span class="parts-count" id="partsSelected">已选 24 / 24</span>
+            <div class="parts-group">
+              <div class="parts-group-head">
+                <b data-i18n="parts.head">头部组</b>
+                <span class="parts-count" id="partsHeadCount">11 / 11</span>
+                <small data-i18n="parts.headNote">整组跳过，省最多时间</small>
+              </div>
+              <div class="parts-chips" id="partsHeadChips"></div>
+            </div>
+            <div class="parts-foot">
+              <span class="parts-count" id="partsSelected">已选 24 / 24</span>
+            </div>
           </div>
           <p class="field-error" id="partsError" hidden></p>
         </div>
@@ -163,7 +169,7 @@
             <input type="checkbox" id="tblrSplit" checked />
             <span class="switch-track" aria-hidden="true"></span>
             <span class="switch-copy">
-              <b data-i18n="toggle.tblr">左右对称分割</b>
+              <b data-i18n="toggle.tblr" data-i18n-tip="tip.tblr">左右对称分割</b>
               <small>tblr_split</small>
             </span>
           </label>
@@ -172,7 +178,7 @@
             <input type="checkbox" id="useLama" checked />
             <span class="switch-track" aria-hidden="true"></span>
             <span class="switch-copy">
-              <b data-i18n="toggle.lama">LaMa 修补</b>
+              <b data-i18n="toggle.lama" data-i18n-tip="tip.lama">LaMa 修补</b>
               <small id="lamaNote">use_lama</small>
             </span>
           </label>
@@ -181,8 +187,8 @@
             <input type="checkbox" id="layerFix" checked />
             <span class="switch-track" aria-hidden="true"></span>
             <span class="switch-copy">
-              <b data-i18n="toggle.layerFix">图层修补</b>
-              <small data-i18n="toggle.layerFixNote">修贴边图层被丢、眼白盖住虹膜</small>
+              <b data-i18n="toggle.layerFix" data-i18n-tip="tip.layerFix">图层修补</b>
+              <small>layer_fix</small>
             </span>
           </label>
 
@@ -190,7 +196,7 @@
             <input type="checkbox" id="savePsd" checked />
             <span class="switch-track" aria-hidden="true"></span>
             <span class="switch-copy">
-              <b data-i18n="toggle.psd">导出 PSD</b>
+              <b data-i18n="toggle.psd" data-i18n-tip="tip.psd">导出 PSD</b>
               <small>save_to_psd</small>
             </span>
           </label>

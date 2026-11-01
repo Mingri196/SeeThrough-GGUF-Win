@@ -113,6 +113,12 @@
       "action.partsNone": "清空",
       "action.partsBody": "仅身体组",
       "action.partsHead": "仅头部组",
+      "action.partsExpand": "展开",
+      "action.partsCollapse": "收起",
+      "tip.tblr": "把部件拆成左右两半（如左手 / 右手分开）",
+      "tip.lama": "用神经网络补全被抠出的边缘空洞",
+      "tip.layerFix": "修掉后处理阶段的几处已知缺陷",
+      "tip.psd": "导出可编辑的 Photoshop 分层文件",
       "toggle.lamaUnavailable": "未打补丁，此开关固定开启",
       "adv.title": "高级选项",
 
@@ -312,6 +318,12 @@
       "action.partsNone": "None",
       "action.partsBody": "Body only",
       "action.partsHead": "Head only",
+      "action.partsExpand": "Expand",
+      "action.partsCollapse": "Collapse",
+      "tip.tblr": "Split parts into left and right halves (e.g. separate hands)",
+      "tip.lama": "Fill the holes left by the cut-out using a neural inpainter",
+      "tip.layerFix": "Repair a few known defects in the post-processing stage",
+      "tip.psd": "Export an editable layered Photoshop file",
       "toggle.lamaUnavailable": "STM not patched — this switch is forced on",
       "adv.title": "Advanced",
 
@@ -505,6 +517,10 @@
 
     document.querySelectorAll("[data-i18n-aria]").forEach((node) => {
       node.setAttribute("aria-label", t(node.getAttribute("data-i18n-aria")));
+    });
+
+    document.querySelectorAll("[data-i18n-tip]").forEach((node) => {
+      node.setAttribute("data-tip", t(node.getAttribute("data-i18n-tip")));
     });
 
     document.querySelectorAll("[data-lang-opt]").forEach((node) => {
@@ -1064,6 +1080,18 @@
     return Array.from(document.querySelectorAll("#partsBodyChips input, #partsHeadChips input"));
   }
 
+  function setPartsExpanded(open) {
+    const body = el("partsPanel");
+    const btn = el("partsToggle");
+    if (!body || !btn) return;
+    body.hidden = !open;
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    const label = el("partsToggleLabel");
+    if (label) {
+      label.textContent = open ? t("action.partsCollapse") : t("action.partsExpand");
+    }
+  }
+
   function buildParts() {
     [["body", "partsBodyChips"], ["head", "partsHeadChips"]].forEach(([group, id]) => {
       const box = el(id);
@@ -1241,6 +1269,10 @@
 
   [["partsAll", "all"], ["partsNone", "none"], ["partsBody", "body"], ["partsHead", "head"]].forEach(([id, mode]) => {
     el(id).addEventListener("click", () => setParts(mode));
+  });
+
+  el("partsToggle").addEventListener("click", () => {
+    setPartsExpanded(el("partsPanel").hidden);
   });
 
   [widthInput, heightInput, stepsInput].forEach((node) => {
@@ -2286,6 +2318,7 @@
   function boot() {
     applyI18n();
     buildParts();
+    setPartsExpanded(false);
     setSeedMode("fixed");
     clearLog();
 

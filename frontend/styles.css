@@ -1966,3 +1966,80 @@ button.psd-file {
   border-color: var(--ink);
   color: var(--ink);
 }
+
+/* ─────────────────────── 开关悬停提示（data-tip） ─────────────────────── */
+
+.switch-copy b[data-tip] {
+  position: relative;
+  cursor: help;
+  border-bottom: 1px dotted var(--line-strong);
+}
+
+.switch-copy b[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: calc(100% + 12px);
+  top: 50%;
+  z-index: 60;
+  width: max-content;
+  max-width: 230px;
+  padding: 6px 9px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper-raised);
+  box-shadow: 0 4px 12px rgba(26, 24, 19, 0.14);
+  color: var(--ink-soft);
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: normal;
+  text-align: left;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-4px, -50%);
+  transition: opacity var(--dur-1) var(--ease), transform var(--dur-1) var(--ease);
+}
+
+.switch-copy b[data-tip]:hover::after {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+
+/* ─────────────────────── 输出图层：展开 / 收起 ─────────────────────── */
+
+.parts-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.parts-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper-raised);
+  color: var(--ink-muted);
+  font-family: var(--font-body);
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+
+.parts-toggle:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.parts-toggle-arrow {
+  font-size: 9px;
+  line-height: 1;
+  transition: transform var(--dur-1) var(--ease);
+}
+
+.parts-toggle[aria-expanded="true"] .parts-toggle-arrow {
+  transform: rotate(180deg);
+}

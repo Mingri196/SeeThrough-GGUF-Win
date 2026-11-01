@@ -10,6 +10,18 @@ from functools import lru_cache
 import yaml
 
 import numpy as np
+
+def _stg_fix_enabled(name):
+    # __STG_LAYER_FIX__ 图层修补开关。STG_LAYER_FIX=0/off 全关，=1/on 全开，
+    # 也可以写成 "drop,order,mask" 只开其中几项（名字对应补丁里的三处修复）。
+    v = str(os.environ.get("STG_LAYER_FIX", "1")).strip().lower()
+    if v in ("0", "off", "false", "no"):
+        return False
+    if v in ("", "1", "on", "true", "yes"):
+        return True
+    return name in [x.strip() for x in v.split(",") if x.strip()]
+
+
 from PIL import Image
 import cv2
 
@@ -541,7 +553,7 @@ def load_part(srcp: str, rotate=False, pad=0, min_width=64, min_sz=12, depth_min
         rst.update({'img': img, 'depth': depth, 'mask': mask, 'tag': tag})
         return rst
 
-    if np.count_nonzero(mask if os.environ.get("STG_LAYER_FIX", "1") != "0" else mask[:-p_test, :-p_test]) > 4:
+    if np.count_nonzero(mask if _stg_fix_enabled("drop") else mask[:-p_test, :-p_test]) > 4:
         if rotate:
             img = np.rot90(img, 3)
             mask = np.rot90(mask, 3, )

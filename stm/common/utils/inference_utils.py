@@ -20,6 +20,18 @@ from psd_tools import PSDImage
 from safetensors.torch import load_file
 import cv2
 import numpy as np
+
+def _stg_fix_enabled(name):
+    # __STG_LAYER_FIX__ 图层修补开关。STG_LAYER_FIX=0/off 全关，=1/on 全开，
+    # 也可以写成 "drop,order,mask" 只开其中几项（名字对应补丁里的三处修复）。
+    v = str(os.environ.get("STG_LAYER_FIX", "1")).strip().lower()
+    if v in ("0", "off", "false", "no"):
+        return False
+    if v in ("", "1", "on", "true", "yes"):
+        return True
+    return name in [x.strip() for x in v.split(",") if x.strip()]
+
+
 import torch
 from PIL import Image
 
@@ -554,7 +566,9 @@ def process_cuts(img, depth, src_xyxy, tgt_bbox, p=5, mask=None):
         img[..., -1] *= mask
         depth = 1 - (1-depth) * mask
         if np.any(mask):
-            depth_median = np.median(depth[mask])
+            depth_median = np.median(
+                depth[mask.astype(bool)] if _stg_fix_enabled("mask") else depth[mask]
+            )
     
     fxyxy = [tx1 + src_xyxy[0], ty1 + src_xyxy[1], tx2 + src_xyxy[0], ty2 + src_xyxy[1]]
 
@@ -735,7 +749,7 @@ def further_extr(srcd: str, rotate=True, save_to_psd=False, tblr_split=True, use
 
 def _stg_reorder_eyes(items):
     # __STG_LAYER_FIX__ 眼白在虹膜之下、睫毛之上；深度太接近时按深度排会颠倒
-    if os.environ.get("STG_LAYER_FIX", "1") == "0":
+    if not _stg_fix_enabled("order"):
         return items
     rank = {"eyewhite": 0, "irides": 1, "eyelash": 2}
     eyes = [i for i in items if str(i.get("tag", "")).rsplit("-", 1)[0] in rank]

@@ -153,7 +153,7 @@ Put both GGUF files under `models/` (subdirectories such as `models/layerdiff3d/
 | `parts` | str[] \| null | default `null` (all 24) | Generate only the listed layers; aliases `hair` → front+back hair, `eyes` → irides/eyebrow/eyewhite/eyelash. Only affects what is written out: body parts are always sampled as a whole, while the head group is skipped entirely when nothing from it is selected |
 | `save_cut_images` | bool | default **`true`** | Also write `cuts/` (per-layer RGBA crops) and `cuts/manifest.json` (pivots, bones, parents, joint overlap) |
 | `group_offload` | bool | default `false` | Shuttle weights between CPU and GPU per group — more VRAM headroom, slower; overlaps with streaming |
-| `layer_fix` | bool | default **`true`** | Layer fixes (post-processing patch, no repainting): ① layers hugging the bottom edge of the canvas (typically footwear) are no longer killed by the "empty layer" check; ② eyes are stacked in a fixed eyewhite → irides → eyelash order so the iris is not hidden |
+| `layer_fix` | bool | default **`true`** | Layer fixes (post-processing patch, no repainting): ① layers hugging the bottom edge of the canvas (typically footwear) are no longer killed by the "empty layer" check; ② eyes are stacked in a fixed eyewhite → irides → eyelash order so the iris is not hidden; ③ the mask is indexed as a boolean, fixing the `IndexError` crash during left/right split |
 | `quantized` | bool | default **`true`** | GGUF quantisation + streaming; turning it off puts all weights in VRAM |
 | `layerdiff_model` | str | relative path under `models/`, optional | Layer model; falls back to `layerdiff_gguf` in `config.json` |
 | `keep_model` | bool | default **`true`** | Keep the model in VRAM after a job so the next run skips loading; off means reload every run and release memory immediately |
@@ -212,14 +212,17 @@ Only two upstream files are touched: `common/utils/inference_utils.py` (new `use
 
 ### 5.3 Layer fixes (`layer_fix`)
 
-Upstream post-processing has two defects that make outputs look like something is missing. This project patches both; the "Layer fixes" switch in 02 turns them off per job (`STG_LAYER_FIX=0` restores upstream behaviour exactly):
+Upstream post-processing has three defects that make outputs look like something is missing — or crash outright. This project patches all three; the "Layer fixes" switch in 02 turns them off per job (`STG_LAYER_FIX=0` restores upstream behaviour exactly):
 
 | Symptom | Cause | Fix |
 | ----------- | ----------------------------------------------------------------------------------------------- | ---------------------------------- |
 | A whole footwear layer disappears, feet show through | `load_part()` checks for an empty layer by first cropping the bottom/right 10% band, then counting alpha pixels; layers hugging the bottom edge (footwear bounding boxes often end exactly at row 768) count as 0 → the layer is dropped | Count the whole mask instead |
 | One eye turns white, no pupil | `dump_parts_psd()` stacks layers by `depth_median`, and the three eye layers are extremely close (measured: eyewhite 0.341 / irides 0.349) — noise puts the eyewhite above the iris | Group the three layers and order them eyewhite → irides → eyelash, keeping their overall position |
+| The whole inference crashes during left/right split | `process_cuts()` converts the mask to uint8 and then indexes with `depth[mask]`; numpy treats an integer array as fancy indexing (reading row 0 / row 1), so a hand component only 1 pixel tall goes out of bounds with `IndexError: index 1 is out of bounds for axis 0 with size 1` | Cast to a boolean mask before indexing |
 
 It **only reorders / keeps existing pixels, it never repaints**: re-running post-processing on the same 768 output took the layer count from 22 to 23 (footwear back) and blank pixels versus the source image from 4728 down to 991. Patch script `backend/patches/apply_layer_fix.py` (idempotent, run automatically by `1-setup.bat`).
+
+For finer control while debugging, the environment variable takes granular values: `STG_LAYER_FIX=drop` (only the dropped-layer fix), `=order` (only the eye stacking), `=mask` (only the mask indexing); comma combinations like `=drop,order` work too, and `=0` / `=off` disables everything.
 
 ---
 
