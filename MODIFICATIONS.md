@@ -4,7 +4,7 @@
 
 - 上游基线：`02cba07`（2026-09-14，*feat: add ragdoll confidence parameter and post-processing script*）
 - 修改者：Mingri196（<https://github.com/Mingri196/SeeThrough-GGUF-Win>，非上游作者，修改未获上游背书）
-- 修改日期：2026-10-29（LaMa 开关）、2026-10-30（图层修补）、2026-11-02（边缘精修）
+- 修改日期：2026-10-29（LaMa 开关）、2026-10-30（图层修补）、2026-11-02（边缘精修）、2026-11-03（切图保存健壮性）
 - 许可证：Apache-2.0，全文见根目录 [LICENSE](LICENSE)
 
 ## 被修改的文件
@@ -31,6 +31,8 @@
 | `save_masked_input()` 无 alpha 分支 | `soft_alpha` 打开（默认）时用 `_stg_soft_alpha()` 保留边缘过渡；`--no-soft_alpha` 退回上游的 `(prob >= 0.5) * 255` |
 | `save_masked_input()` 有 alpha 分支 | `edge_refine` 打开时也跑一次分割器，再交给 `_stg_refine_alpha_band()` |
 | 新增 `_stg_refine_alpha_band()` | 只把分割器概率写进原 alpha 的边缘带（±3 px），带宽之外保持用户原值 |
+| `further_extr()` 保存切图处 | `Image.fromarray(part_dict['img'])` 改为 `np.ascontiguousarray(...)`，并跳过 0 尺寸的空层（骨骼切割后某个关节没分到像素会触发 `SystemError: tile cannot extend outside image`） |
+| `save_part()` 落盘分支 | 同上，PNG 与 depth 写出前都转连续内存 |
 | main 循环 | 传 `args.edge_refine`；打开时带 alpha 的图也会加载分割器 |
 
 ### 3. `common/utils/io_utils.py`（图层修补）

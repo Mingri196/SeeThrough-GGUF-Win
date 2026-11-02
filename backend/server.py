@@ -2113,6 +2113,14 @@ def _reassemble_env(job: Job) -> dict:
     if env.get("PYTHONPATH"):
         parts.append(env["PYTHONPATH"])
     env["PYTHONPATH"] = os.pathsep.join(parts)
+    # 后处理同样要用项目内的组件缓存（RTMPose 等）：不设 HF_HOME 会去系统缓存找，
+    # 找不到就直连 huggingface.co，国内基本是 502；HF_ENDPOINT 一并带上走镜像
+    endpoint = resolve_hf_endpoint()
+    if endpoint:
+        env["HF_ENDPOINT"] = endpoint
+        if "hf-mirror.com" in endpoint:
+            env.setdefault("HF_HUB_DISABLE_XET", "1")
+    components_paths.apply_env(env)
     env["SEETHROUGH_COMPILE_DEQUANT"] = "1" if CONFIG.get("compile_dequant") else "0"
     env["STG_LAYER_FIX"] = "1" if job.params.get("layer_fix", True) else "0"
     return env
@@ -2135,19 +2143,50 @@ def _postprocess_argv(target: Path, opts: dict) -> list[str]:
     return argv
 
 
+def _log_level_of(line: str) -> str:
+    """把后处理输出的一行映射成日志级别，供控制台着色。"""
+    low = line.lower()
+    if "traceback" in low or "exception" in low or "error" in low or "failed" in low:
+        return "error"
+    if "warning" in low or "[warn]" in low:
+        return "warn"
+    return "info"
+
+
 def _run_reassemble(job_id: str, opts: dict) -> None:
     job = load_job(job_id)
     state = REASSEMBLE.setdefault(job_id, {"log": []})
+    # 历史任务默认只在 meta 里、load_job 每次重建对象；固化到内存后
+    # /api/status 才能读到这次后处理写下的日志
+    if job:
+        JOBS.setdefault(job_id, job)
+
+    def emit(msg: str, level: str | None = None) -> None:
+        state["log"].append(msg)
+        state["log"] = state["log"][-600:]
+        if job:
+            job.log(msg, level or _log_level_of(msg))
+
+    started = time.time()
     try:
         targets = _out_subdirs(job) if job else []
         if not targets:
-            state["log"].append("找不到可后处理的输出目录（缺少 src_img.png）")
+            emit("后处理重跑失败：找不到可处理的输出目录（缺少 src_img.png）", "error")
             state.update({"running": False, "ok": False, "rc": 1, "finished": time.time()})
             return
         env = _reassemble_env(job)
+        flags = ["左右分割" if opts.get("tblr_split", True) else "不分割"]
+        if opts.get("ragdoll_split"):
+            flags.append("骨骼切割")
+        if opts.get("save_psd", True):
+            flags.append("PSD")
+        if opts.get("save_cut_images", True):
+            flags.append("切图")
+        emit(f"后处理重跑 · 开始 · {' / '.join(flags)}", "info")
+
         rc = 0
         for target in targets:
-            state["log"].append(f"[postprocess] {target.name}")
+            emit(f"[postprocess] {target.name}", "info")
             proc = subprocess.Popen(
                 _postprocess_argv(target, opts),
                 cwd=str(ROOT),
@@ -2163,14 +2202,18 @@ def _run_reassemble(job_id: str, opts: dict) -> None:
             for line in proc.stdout:
                 line = line.rstrip()
                 if line:
-                    state["log"].append(line)
-                    state["log"] = state["log"][-600:]
+                    emit(line)
             rc = proc.wait() or rc
         job.outputs = scan_outputs(job)
         job.save_meta()
+        cost = round(time.time() - started, 1)
+        if rc == 0:
+            emit(f"后处理重跑完成 · 用时 {cost} s", "info")
+        else:
+            emit(f"后处理重跑失败 · 退出码 {rc} · 用时 {cost} s", "error")
         state.update({"running": False, "ok": rc == 0, "rc": rc, "finished": time.time()})
     except Exception as exc:
-        state["log"].append(f"[错误] {type(exc).__name__}: {exc}")
+        emit(f"后处理重跑异常：{type(exc).__name__}: {exc}", "error")
         state.update({"running": False, "ok": False, "rc": 1, "finished": time.time()})
 
 

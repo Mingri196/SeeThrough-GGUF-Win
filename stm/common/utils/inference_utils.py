@@ -539,8 +539,8 @@ def save_part(tag, saved, part_dict, crop=True, save_part_info=False, save_to_di
     part_dict['tag'] = tag
 
     if save_to_disk:
-        Image.fromarray(img).save(osp.join(saved, tag + '.png'))
-        Image.fromarray(depth).save(osp.join(saved, tag + '_depth.png'))
+        Image.fromarray(np.ascontiguousarray(img)).save(osp.join(saved, tag + '.png'))
+        Image.fromarray(np.ascontiguousarray(depth)).save(osp.join(saved, tag + '_depth.png'))
         if save_part_info:
             dict2json(part_dict, osp.join(saved, tag + '.json'))
     else:
@@ -716,7 +716,15 @@ def further_extr(srcd: str, rotate=True, save_to_psd=False, tblr_split=True, use
             part_dict_list.append(part_dict)
         if save_cut_images:
             filename = t + '.png'
-            Image.fromarray(part_dict['img']).save(osp.join(cuts_dir, filename))
+            cut_img = part_dict['img']
+            # 空层（骨骼切割后某个关节没分到像素）裁出来是 0 尺寸，
+            # 直接存会抛 SystemError；跳过即可，manifest 里也不记这一项
+            if cut_img is None or cut_img.size == 0 or 0 in cut_img.shape[:2]:
+                print(f'[WARN] {t} 切图为空，跳过')
+                continue
+            # ascontiguousarray：cut_img 通常是原图的切片视图，非连续内存在
+            # PIL 编码时会按 stride 越界读取
+            Image.fromarray(np.ascontiguousarray(cut_img)).save(osp.join(cuts_dir, filename))
             cut_info = {'bbox': list(part_dict['xyxy'])}
             for key in ('pivot', 'bone', 'parent', 'joint_overlap_ratio'):
                 if key in part_dict:

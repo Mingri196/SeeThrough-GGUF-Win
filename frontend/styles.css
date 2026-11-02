@@ -2332,8 +2332,17 @@ button.psd-file {
   flex: 0 0 auto;
 }
 
+/* 「历史记录」与「后处理重跑」拼成一组：抵消父级 gap，边框重叠成一条分隔线 */
+.stage-head #histBtn {
+  margin-right: -12px;
+}
+
 .stage-head .stage-tools {
-  margin-left: 8px;
+  margin-left: 0;
+}
+
+.stage-head .stage-tools .ghost-btn.mini {
+  margin-left: -1px;
 }
 
 .hist-drawer {

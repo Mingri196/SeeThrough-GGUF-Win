@@ -181,6 +181,10 @@
 
       "log.title": "运行日志",
       "log.follow": "跟随",
+      "log.copy": "复制日志",
+      "log.copied": "已复制",
+      "log.copyEmpty": "暂无日志可复制",
+      "log.copyFail": "复制失败，可在日志区手动选择后复制",
       "log.clear": "清空",
       "log.empty": "等待任务开始",
 
@@ -409,6 +413,10 @@
 
       "log.title": "Run log",
       "log.follow": "Follow",
+      "log.copy": "Copy log",
+      "log.copied": "Copied",
+      "log.copyEmpty": "No log to copy",
+      "log.copyFail": "Copy failed - select the text and copy manually",
       "log.clear": "Clear",
       "log.empty": "Waiting for a run",
 
@@ -756,7 +764,7 @@
         state.activeParams = Object.assign({}, payload.params || {}, {
           seed: payload.seed_used != null ? payload.seed_used : (payload.params || {}).seed,
         });
-        finalize(payload, jobId);
+        finalize(payload, jobId, { log: false });
         // finalize 会把副标题改成文件数，这里补一句"这是历史"避免和当前任务混淆
         el("stageSub").textContent =
           t("history.viewing") + " · " + jobId.slice(0, 8) + " · " + el("stageSub").textContent;
@@ -817,6 +825,7 @@
     lastResults: null,
     fixedSeed: 42,
     logCount: 0,
+    logLines: [],
     es: null,
     timer: null,
     startedAt: 0,
@@ -961,6 +970,18 @@
     const normalized = String(entry.msg == null ? "" : entry.msg).replace(/\s+$/, "");
     if (!normalized) return;
 
+    // 复制日志用的正文副本：与面板同一条数上限，进度行只保留最新一条
+    const record = { ts: entry.ts, level, msg: normalized };
+    const tail = state.logLines[state.logLines.length - 1];
+    if (level === "progress" && tail && tail.level === "progress") {
+      state.logLines[state.logLines.length - 1] = record;
+    } else {
+      state.logLines.push(record);
+      if (state.logLines.length > LOG_LIMIT) {
+        state.logLines.splice(0, state.logLines.length - LOG_LIMIT);
+      }
+    }
+
     // 进度类日志复用一个节点，避免刷屏把有效信息顶走
     if (level === "progress") {
       if (state.lastProgressNode && state.lastProgressNode.parentNode === body) {
@@ -1016,11 +1037,62 @@
     idle.textContent = t("log.empty");
     body.appendChild(idle);
     state.logCount = 0;
+    state.logLines = [];
     state.lastProgressNode = null;
     el("logCount").textContent = "0";
   }
 
-  el("logClear").addEventListener("click", clearLog);
+  function logText() {
+    return state.logLines
+      .map((line) => `${clockTime(line.ts)}  ${t(LEVEL_LABEL[line.level] || LEVEL_LABEL.info)}  ${line.msg}`)
+      .join("\r\n");
+  }
+
+  function legacyCopy(text) {
+    // 剪贴板 API 不可用时的回落：隐藏 textarea + execCommand
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.top = "0";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } finally {
+      area.remove();
+    }
+    if (!ok) throw new Error("execCommand copy failed");
+  }
+
+  function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).catch(() => legacyCopy(text));
+    }
+    return Promise.resolve().then(() => legacyCopy(text));
+  }
+
+  el("logClear").addEventListener("click", () => clearLog());
+
+  el("logCopy").addEventListener("click", () => {
+    const btn = el("logCopy");
+    const text = logText();
+    if (!text) {
+      showNotice("warn", t("log.copyEmpty"));
+      return;
+    }
+    copyToClipboard(text)
+      .then(() => {
+        btn.textContent = t("log.copied");
+        clearTimeout(btn.copyTimer);
+        btn.copyTimer = setTimeout(() => {
+          btn.textContent = t("log.copy");
+        }, 1600);
+      })
+      .catch(() => showNotice("warn", t("log.copyFail")));
+  });
 
   /* ────────────────────────────── 模型检查 ────────────────────────────── */
 
@@ -2203,9 +2275,42 @@
     postCloseTimer = setTimeout(() => postOpen(false), 3000);
   }
 
+  const LS_POST = "stg.post";
+
   function syncPostOutputs() {
     el("postConfOut").textContent = Number(el("postConf").value).toFixed(2);
     el("postOverlapOut").textContent = Number(el("postOverlap").value).toFixed(2);
+  }
+
+  // 后处理选项独立记忆：浮层关闭（手动或 3 s 自动）后再次打开仍保持上次的选择。
+  // 只存用户改过的值；从没调过时仍按当前任务的参数初始化。
+  function readPostOpts() {
+    try {
+      const raw = localStorage.getItem(LS_POST);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (err) {
+      return {};
+    }
+  }
+
+  function snapshotPostOpts() {
+    return {
+      tblr_split: el("postTblr").checked,
+      ragdoll_split: el("postRagdoll").checked,
+      save_psd: el("postPsd").checked,
+      save_cut_images: el("postCut").checked,
+      ragdoll_confidence: Number(el("postConf").value),
+      ragdoll_overlap: Number(el("postOverlap").value),
+    };
+  }
+
+  function writePostOpts() {
+    try {
+      localStorage.setItem(LS_POST, JSON.stringify(snapshotPostOpts()));
+    } catch (err) {
+      /* 无痕模式写入会抛错，记不住不影响使用 */
+    }
   }
 
   function postOpen(open) {
@@ -2216,12 +2321,18 @@
     if (!open) return;
     cancelPostClose();
     const p = state.activeParams || {};
-    el("postTblr").checked = p.tblr_split !== false;
-    el("postRagdoll").checked = p.ragdoll_split === true;
-    el("postPsd").checked = p.save_psd !== false;
-    el("postCut").checked = p.save_cut_images !== false;
-    if (p.ragdoll_confidence != null) el("postConf").value = p.ragdoll_confidence;
-    if (p.ragdoll_overlap != null) el("postOverlap").value = p.ragdoll_overlap;
+    const saved = readPostOpts();
+    const has = (key) => saved[key] !== undefined && saved[key] !== null;
+    const pick = (key, fallback) => (has(key) ? saved[key] : fallback);
+
+    el("postTblr").checked = pick("tblr_split", p.tblr_split !== false) !== false;
+    el("postRagdoll").checked = pick("ragdoll_split", p.ragdoll_split === true) === true;
+    el("postPsd").checked = pick("save_psd", p.save_psd !== false) !== false;
+    el("postCut").checked = pick("save_cut_images", p.save_cut_images !== false) !== false;
+    const conf = pick("ragdoll_confidence", p.ragdoll_confidence);
+    if (conf != null) el("postConf").value = conf;
+    const overlap = pick("ragdoll_overlap", p.ragdoll_overlap);
+    if (overlap != null) el("postOverlap").value = overlap;
     syncPostOutputs();
     el("postStatus").textContent = "";
   }
@@ -2234,6 +2345,13 @@
   function pollPostProcess(jobId) {
     if (postPollTimer) clearInterval(postPollTimer);
     postPollTimer = setInterval(() => {
+      // 后处理输出已写进任务日志，这里主动拉一次让控制台跟着刷新
+      fetch(`/api/status/${jobId}`, { cache: "no-store" })
+        .then((r) => r.json())
+        .then((payload) => {
+          (payload.log_tail || []).forEach(appendLog);
+        })
+        .catch(() => {});
       fetch(`/api/jobs/${jobId}/reassemble`)
         .then((r) => r.json())
         .then((data) => {
@@ -2250,6 +2368,7 @@
             .then((r) => r.json())
             .then((payload) => {
               if (payload && payload.outputs) renderResults(payload);
+              (payload.log_tail || []).forEach(appendLog);
             })
             .catch(() => {});
         })
@@ -2296,6 +2415,11 @@
   el("stageTools").addEventListener("mouseleave", schedulePostClose);
   el("postConf").addEventListener("input", syncPostOutputs);
   el("postOverlap").addEventListener("input", syncPostOutputs);
+  // 任何一项改动都记下来，浮层关闭再打开不会回到默认值
+  ["postTblr", "postRagdoll", "postPsd", "postCut", "postConf", "postOverlap"].forEach((id) => {
+    el(id).addEventListener("change", writePostOpts);
+    el(id).addEventListener("input", writePostOpts);
+  });
   el("postStart").addEventListener("click", startPostProcess);
 
   function renderResults(payload, animate) {
@@ -2675,11 +2799,13 @@
     };
   }
 
-  function finalize(payload, jobId) {
+  function finalize(payload, jobId, opts) {
     if (state.finalized === jobId) return;
     state.finalized = jobId;
     stopPolling();
     setRunning(false);
+    // 看历史任务时不要往面板里补写「耗时」「失败原因」之类，面板保持原样
+    const writeLog = !opts || opts.log !== false;
 
     const status = payload.status || "failed";
     const elapsed = payload.elapsed || 0;
@@ -2698,7 +2824,7 @@
       el("failedHint").textContent = t("err.inference") + (payload.error_detail ? ` (${payload.error_detail})` : "");
       setRunState("status.fail");
       showNotice("error", t("err.inference"));
-      appendLog({ ts: Date.now(), level: "error", msg: t("err.inference") });
+      if (writeLog) appendLog({ ts: Date.now(), level: "error", msg: t("err.inference") });
       return;
     }
 
@@ -2715,13 +2841,13 @@
       setRunState("status.warn");
       const message = payload.error === "no_outputs" ? t("err.noOutputs") : t("err.psd");
       showNotice("warn", message);
-      appendLog({ ts: Date.now(), level: "warn", msg: message });
+      if (writeLog) appendLog({ ts: Date.now(), level: "warn", msg: message });
       return;
     }
 
     renderResults(payload);
     setRunState("status.done");
-    appendLog({ ts: Date.now(), level: "ok", msg: t("log.elapsed", { sec: Math.round(elapsed) }) });
+    if (writeLog) appendLog({ ts: Date.now(), level: "ok", msg: t("log.elapsed", { sec: Math.round(elapsed) }) });
     hideNotice();
   }
 
