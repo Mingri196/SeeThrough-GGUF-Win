@@ -32,7 +32,9 @@ You only need **Python 3.12 (or uv)** — Git is not required. `1-setup.bat` wil
 4. probe `huggingface.co` vs `hf-mirror.com` — **mirror is normally picked in mainland China, official elsewhere** — then prefetch the helper components needed by the first run (~2.4 GB, cached in the project's `components/` folder); **main models are not downloaded**;
 5. run a self-check and print the result.
 
-Afterwards drop the two GGUF files into `models/` (see section 2); if "Model selection" can see them, you are good to go. To skip the component download, run `set STG_SKIP_MODELS=1` before `1-setup.bat`; to also download the main models, run `.venv\Scripts\python.exe backend\download_models.py`.
+Afterwards drop the two GGUF files into `models/` (see section 2); if "Model selection" can see them, you are good to go.
+
+Original **diffusers directories** (the `safetensors` build, i.e. a folder containing `model_index.json`) work too: drop the whole folder into `models/`, one extra nesting level is fine, and the page lists it alongside the GGUF files while inferring whether it is the layer or the depth model. Directory models are not passed `--quantized`, so the "GGUF quantised" switch greys out automatically. To skip the component download, run `set STG_SKIP_MODELS=1` before `1-setup.bat`; to also download the main models, run `.venv\Scripts\python.exe backend\download_models.py`.
 
 Manual equivalent (run from the project root):
 
@@ -116,8 +118,8 @@ Put both GGUF files under `models/` (subdirectories such as `models/layerdiff3d/
 | Step | What it does |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **01 Image** | Drag & drop or pick a file — **PNG / JPG / WEBP / BMP**. Extension, size and decodability are validated immediately; a thumbnail, file name, size and pixel dimensions are shown. You can remove or replace the image at any time; replacing clears the previous result and job traces |
-| **02 Parameters** | Width/height (synced, multiple of 64), inference steps, seed mode, **output parts** (24 tags grouped by body / head, all selected by default), `tblr_split` / `use_lama` / `layer_fix` / `save_to_psd` switches, and advanced items (quantized streaming, depth steps, depth resolution, foreground mask resolution, attention backend, ragdoll split, pose confidence, joint overlap, keep cut images & manifest) |
-| **03 Model selection** | Recursively scans `models/` (including subdirectories) and lets you pick the "layer model" and the "depth model" separately; the dropdown shows relative paths (e.g. `marigold3d/marigold3d-Q5_1.gguf`), so quantisation variants of the same name never get confused; switching variants needs no `config.json` edit. "Rescan" refreshes the list. "Keep model loaded" (on by default) keeps models in VRAM and saves ~40–75 s of loading per run; "Group offload" (off by default) shuttles weights between CPU and GPU per group — more VRAM headroom, slower |
+| **02 Parameters** | Width/height (synced, multiple of 64), inference steps, seed mode, **output parts** (24 tags grouped by body / head, all selected by default), `tblr_split` / `use_lama` / `layer_fix` / `save_to_psd` switches, **edge refine / refine alpha images** (see `soft_alpha` and `edge_refine` below), and advanced items (quantized streaming, depth steps, depth resolution, foreground mask resolution, attention backend, ragdoll split, pose confidence, joint overlap, keep cut images & manifest) |
+| **03 Model selection** | Recursively scans `models/` (including subdirectories) for `.gguf` files and diffusers directories containing `model_index.json`, then lets you pick the "layer model" and the "depth model" separately; the dropdown shows relative paths (e.g. `marigold3d/marigold3d-Q5_1.gguf`), so quantisation variants of the same name never get confused; switching variants needs no `config.json` edit. "Rescan" refreshes the list. "Keep model loaded" (on by default) keeps models in VRAM and saves ~40–75 s of loading per run; "Group offload" (off by default) shuttles weights between CPU and GPU per group — more VRAM headroom, slower |
 | **04 Run** | Start / cancel; below it the resolution, steps, actual seed and elapsed time of this run are always visible |
 | **Stage** | Top right "Re-post-process" (popover: left/right split, ragdoll split, confidence, joint overlap, PSD, cut images — post-processing only, no re-sampling) + real output thumbnails (click for full size) + PSD row ("Open folder" opens that job's `out/`) + manifest row (`cuts/manifest.json`, `pose_keypoints.json` and other JSON are downloadable) + a **pose confidence** strip (after ragdoll splitting, joints below the threshold are listed automatically); the persistent log console sits below |
 | **Settings** | The top bar "Settings" opens `/settings` in a new tab. A fixed sidebar with three pages (fully bilingual, **follows the workbench CN/EN switch live**): **Environment** (Python / torch / CUDA / GPU & VRAM / driver / OS / CPU / RAM / download source with handshake latency / paths / component cache path and size / model list / patches & switches / disk, plus "Copy diagnostics" in the top right), **Startup & port** (listen address and local-only/LAN verdict, configured port, **change address / change port** written back to config.json — auto-backed up as `config.json.bak`, effective after restart — PID and uptime, config.json path and last-modified time), **Maintenance** (service status, integrity checks for .venv / STM code / both main models / three patches, job count and disk usage, open outputs / models / project root, plus "Open command prompt" in the top right, which launches `3-env.bat` in a cmd window with `.venv` activated — local machine only). Everything is read-only apart from the two port/address fields |
@@ -154,7 +156,9 @@ Put both GGUF files under `models/` (subdirectories such as `models/layerdiff3d/
 | `save_cut_images` | bool | default **`true`** | Also write `cuts/` (per-layer RGBA crops) and `cuts/manifest.json` (pivots, bones, parents, joint overlap) |
 | `group_offload` | bool | default `false` | Shuttle weights between CPU and GPU per group — more VRAM headroom, slower; overlaps with streaming |
 | `layer_fix` | bool | default **`true`** | Layer fixes (post-processing patch, no repainting): ① layers hugging the bottom edge of the canvas (typically footwear) are no longer killed by the "empty layer" check; ② eyes are stacked in a fixed eyewhite → irides → eyelash order so the iris is not hidden; ③ the mask is indexed as a boolean, fixing the `IndexError` crash during left/right split |
-| `quantized` | bool | default **`true`** | GGUF quantisation + streaming; turning it off puts all weights in VRAM |
+| `quantized` | bool | default **`true`** | Keeps GGUF weights quantised in VRAM and dequantises on the fly. Turning it off dequantises the whole model into **RAM** and moves it to the GPU operator by operator — VRAM usage drops, but it runs dozens of times slower with identical quality |
+| `soft_alpha` | bool | default **`true`** | Edge refine (main). For images without alpha, keeps the segmenter's soft probabilities inside a ±6 px band around the 0.5 boundary and forces 0/255 elsewhere; turning it off restores upstream's hard `(prob >= 0.5) * 255` |
+| `edge_refine` | bool | default `false` | Refine alpha images (sub-switch). Also runs the segmenter on images that already have alpha and replaces only the 3 px edge band, interior untouched; forced to `false` when `soft_alpha` is off |
 | `layerdiff_model` | str | relative path under `models/`, optional | Layer model; falls back to `layerdiff_gguf` in `config.json` |
 | `keep_model` | bool | default **`true`** | Keep the model in VRAM after a job so the next run skips loading; off means reload every run and release memory immediately |
 | `depth_model` | str | relative path under `models/`, optional | Depth model; falls back to `depth_gguf` in `config.json` |
@@ -167,7 +171,7 @@ Other endpoints:
 | ------ | ------------------------------- | ---------------------------------------------------------------------------------- |
 | GET | `/api/config` | Defaults, constraint ranges, supported extensions, upload limit |
 | GET | `/api/check_models` | Default GGUFs, STM repository, LaMa patch and network state |
-| GET | `/api/models` | Recursive list of `.gguf` under `models/` (with role inference and defaults) |
+| GET | `/api/models` | Recursive list of `.gguf` files and diffusers directories under `models/` (with role inference, `kind` and defaults) |
 | GET | `/api/stream/<job_id>` | SSE: `event: log` (`{ts, level, msg}`) + `event: done` (status, outputs, elapsed) |
 | GET | `/api/status/<job_id>` | Polling fallback, includes the last 200 log lines |
 | POST | `/api/jobs/<job_id>/cancel` | Kill the process tree, set status to `canceled` |
@@ -198,7 +202,7 @@ if not quantized:
     stream = False
 ```
 
-In other words, without `--quantized` the GGUF is fully dequantised on load and **streaming is silently disabled** — exactly how you blow up 6 GB of VRAM. This project always passes it and exposes a switch in the advanced panel.
+In other words, without `--quantized` the GGUF is fully dequantised on load (`float16` on cards below CC 8.0) into **system RAM**, then `enable_streamed_gpu_compute()` shuttles it to the GPU operator by operator. A 6 GB card sits below the 8 GB threshold, so it falls back to the slowest `leaf_level` path with synchronous PCIe copies: VRAM usage actually drops (about 1.8 GB), RAM gets tight, and **each step takes tens of seconds** — not an OOM, just close to unusable. This project always passes it and exposes a switch in the advanced panel.
 
 ### 5.2 The `use_lama` patch
 
@@ -253,7 +257,7 @@ For finer control while debugging, the environment variable takes granular value
 | Out of VRAM / swapping to death | Make sure "GGUF quantised + streaming" is on (default) and drop the resolution to 720 with ~20 steps |
 | VRAM still occupied after a job | "Keep model loaded" (in 03, on by default) holds the model. Turn it off and run once more, or cancel — cancelling also stops the persistent worker |
 | Logs stop scrolling while the job runs | Some security suites buffer SSE; the page polls `/api/status` every 1.5 s as a fallback, which is normal. During sampling you should see `进度 12/30 · 40% · 37.2s/it` — only a completely frozen line means a real hang |
-| Minutes per step, GPU at 100% but only 40–50 W | The resolution pushed you into the `streamed` tier: weights cross PCIe layer by layer and the GPU waits for data most of the time. Dropping to 768 returns to `resident` — on a 6 GB card **1024 ≈ 300 s/step → 768 ≈ 37 s/step** |
+| Minutes per step, GPU at 100% but only 40–50 W | The resolution pushed you into the `streamed` tier: weights cross PCIe layer by layer and the GPU waits for data most of the time. Dropping to 768 returns to `resident` — on a 6 GB card **1024 ≈ 300 s/step → 768 ≈ 37 s/step**. If you turned off "GGUF quantised + streamed", even 768 degrades to `leaf_level` per-operator shuttling: equally slow and it will not OOM — just switch it back on |
 | Want the `torch.compile` dequantisation speed-up (only meaningful for CC ≥ 7.0) | Double-click `4-install_triton.bat`: it inspects the environment → derives the matching Triton version → measures mirrors → installs → smoke-tests with a **real dequantisation kernel**, and only then sets `compile_dequant: true`. Running it again lets you keep / uninstall / reinstall. Cards below CC 7.0 are told clearly they do not qualify and the flag is never enabled. Commands and troubleshooting: [docs/triton-windows.en.md](docs/triton-windows.en.md); if you would rather not do it yourself, hand [docs/triton-windows-ai.md](docs/triton-windows-ai.md) to an AI |
 | Port already in use | Change `port` in `config.json`, or stop whatever holds 7860 |
 | After updating, `config.json` disappeared, or `git pull` fails with `Your local changes to config.json would be overwritten` | **Since 2026-11-02** `config.json` is no longer tracked (so each user's port and paths stop being committed and colliding); the repo ships `config.example.json` and the app generates `config.json` on first start. Updating from an older clone: back up your edited `config.json` as `config.json.bak` before pulling, start once so the new version writes the defaults, then merge your custom port/paths back in |
@@ -317,7 +321,7 @@ SeeThrough-GGUF-Win/
 │   ├── triton-windows.en.md   # the same guide in English
 │   └── triton-windows-ai.md   # same thing as an AI brief
 ├── stm/                       # upstream snapshot (Apache-2.0, vendored and patched)
-├── models/                    # GGUF (downloaded by you, not in the repo)
+├── models/                    # models (GGUF files or diffusers dirs; downloaded by you, not in the repo)
 ├── components/                # first-run helper components (HF / torch.hub, not in the repo; created by 1-setup.bat)
 ├── outputs/jobs/<id>/         # per-job input, outputs, meta.json (not in the repo)
 └── licenses/

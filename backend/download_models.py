@@ -54,6 +54,7 @@ MODELS = (
 
 # 首次推理时 STM 会拉取的辅助组件。文件清单对应代码里的实际调用：
 #   marigold_depth_pipeline.py: CLIPTextModel / CLIPTokenizer from prs-eth/marigold-depth-v1-1
+#   animeinsseg/skytnt_segmentation.py: skytnt/anime-seg 的 isnetis.ckpt（无 alpha 抠图；「透明图也精修」也用它）
 #   animeinsseg/instance_segmentation.py: rtmdetl_e60.ckpt
 #   lama_inpainter/__init__.py: torch.hub -> <torch home>/hub/checkpoints/lama_large_512px.ckpt
 #   common/utils/ragdoll.py: Tau-J/RTMPose 的两个 onnx zip（仅骨骼切割）
@@ -71,6 +72,13 @@ COMPONENTS = (
             "tokenizer/vocab.json",
             "tokenizer/merges.txt",
         ),
+    },
+    {
+        "key": "animeseg",
+        "label": "动漫前景分割",
+        "repo": "skytnt/anime-seg",
+        "approx_mb": 195,
+        "files": ("isnetis.ckpt",),
     },
     {
         "key": "animeinsseg",

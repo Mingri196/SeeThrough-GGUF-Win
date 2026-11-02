@@ -1039,6 +1039,40 @@ input.is-invalid {
   border-bottom: 1px solid var(--line-faint);
 }
 
+/* 主开关 + 从属开关：从属项缩进并画一条竖线表示层级 */
+.switch-stack {
+  display: grid;
+  border-bottom: 1px solid var(--line-faint);
+}
+
+.switch-stack > .switch {
+  border-bottom: 0;
+}
+
+.switch-sub {
+  position: relative;
+  padding: 5px 0 7px 44px;
+}
+
+.switch-sub::before {
+  content: "";
+  position: absolute;
+  left: 17px;
+  top: 0;
+  bottom: 8px;
+  width: 1px;
+  background: var(--line);
+}
+
+.switch-sub .switch-copy b {
+  font-size: 12.5px;
+}
+
+.switch-sub.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .switch input {
   position: absolute;
   opacity: 0;
@@ -2485,9 +2519,9 @@ button.psd-file {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--ink-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* 失败原因不省略：截断会丢掉「退出码 2」这类关键数字，宁可换行 */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .hist-line3.bad {

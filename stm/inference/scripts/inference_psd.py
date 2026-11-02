@@ -1,4 +1,5 @@
 # __STG_PATCHED_INFERENCE_PSDPY__
+# __STG_PATCHED_INFERENCE_PSDPY_EDGE_REFINE__
 import os.path as osp
 import argparse
 import sys
@@ -25,7 +26,55 @@ from annotators.animeinsseg.skytnt_segmentation import apply_segmentation, resol
 from annotators.animeinsseg.animeseg_refine_model import load_refinenet
 
 
-def save_masked_input(srcp, saved, mask_model=None, mask_resolution='auto'):
+def _stg_map_prob(prob, lo=0.05, hi=0.95):
+    """把分割概率线性映射到 0-255，两端饱和。
+
+    不能直接 prob * 255：确定是前景的像素会变成 242 之类，整个角色淡淡变透明。
+    """
+    p = prob[..., 0] if prob.ndim == 3 else prob
+    a = np.clip((p - lo) / max(hi - lo, 1e-6), 0.0, 1.0)
+    return (a * 255.0).round().astype(np.uint8)
+
+
+def _stg_soft_alpha(prob, band=6):
+    """软 alpha：只在 0.5 边界 ±band 内保留概率过渡，其余强制 0 / 255。
+
+    实测 ISNet 的概率图在远离边界处也会给出 0.2~0.8 的中间值（弱纹理、阴影），
+    全图套映射会在角色外圈留下淡雾、内部被整体拉薄。限定在边界附近既保住
+    边缘坡度，又不动内部与远处背景。
+    """
+    import cv2
+
+    p = prob[..., 0] if prob.ndim == 3 else prob
+    hard = (p >= 0.5).astype(np.uint8)
+    k = np.ones((band * 2 + 1, band * 2 + 1), np.uint8)
+    near = (cv2.dilate(hard, k) - cv2.erode(hard, k)).astype(bool)
+    out = hard * 255
+    mapped = _stg_map_prob(p)
+    out[near] = mapped[near]
+    return out
+
+
+def _stg_refine_alpha_band(alpha, prob, band=3):
+    """把分割器概率只用于原 alpha 的边缘带，其余像素保持原值。
+
+    已有 alpha 的图通常边缘带白边或残留背景色，直接在整张图覆盖会改掉用户
+    手绘的部分；只改边缘 ±band 像素，既修边又不破坏内部。
+    返回 (H, W)，与 Image.getchannel('A') 的形状一致。
+    """
+    import cv2
+
+    base = alpha[..., 0] if alpha.ndim == 3 else alpha
+    p = prob[..., 0] if prob.ndim == 3 else prob
+    m = (base >= 128).astype(np.uint8)
+    k = np.ones((band * 2 + 1, band * 2 + 1), np.uint8)
+    edge = (cv2.dilate(m, k) - cv2.erode(m, k)).astype(bool)
+    out = base.astype(np.float32) / 255.0
+    out[edge] = _stg_map_prob(p)[edge] / 255.0
+    return np.clip(out * 255.0, 0, 255).astype(np.uint8)
+
+
+def save_masked_input(srcp, saved, mask_model=None, mask_resolution='auto', edge_refine=False, soft_alpha=True):
     with Image.open(srcp) as source:
         rgb = np.array(source.convert('RGB'))
         alpha_image = source.getchannel('A') if 'A' in source.getbands() else None
@@ -34,9 +83,23 @@ def save_masked_input(srcp, saved, mask_model=None, mask_resolution='auto'):
             raise ValueError(f'{srcp} has no foreground alpha mask')
         mask_resolution = resolve_segmentation_resolution(rgb, mask_resolution)
         print(f'foreground mask resolution: {mask_resolution}')
-        alpha = (apply_segmentation(rgb, model=mask_model, s=mask_resolution) >= 0.5).astype(np.uint8) * 255
+        prob = apply_segmentation(rgb, model=mask_model, s=mask_resolution)
+        # 无 alpha 的图本来就要跑分割器，保留软边没有额外成本，所以默认就开；
+        # --no-soft-alpha 可退回上游的硬二值行为
+        if soft_alpha:
+            alpha = _stg_soft_alpha(prob)
+        else:
+            alpha = (prob >= 0.5).astype(np.uint8) * 255
     else:
         alpha = np.array(alpha_image)
+        if edge_refine:
+            # 已有 alpha 也跑一次分割器，只替换边缘带
+            if mask_model is None:
+                raise ValueError('edge_refine requires a foreground segmenter')
+            mask_resolution = resolve_segmentation_resolution(rgb, mask_resolution)
+            print(f'edge refine mask resolution: {mask_resolution}')
+            prob = apply_segmentation(rgb, model=mask_model, s=mask_resolution)
+            alpha = _stg_refine_alpha_band(alpha, prob)
 
     bbox = Image.fromarray(alpha).getbbox()
     if bbox is None:
@@ -74,6 +137,8 @@ if __name__ == '__main__':
     parser.add_argument('--save_cut_images', action='store_true', help='keep all extracted RGBA cut PNGs in the per-image output folder')
     parser.add_argument('--tblr_split', action='store_true', help='try split parts (handwear, eyes, etc) into left-right components')
     parser.add_argument('--use_lama', action=argparse.BooleanOptionalAction, default=True, help='use LaMa inpainting during post-processing (default on)')
+    parser.add_argument('--soft_alpha', action=argparse.BooleanOptionalAction, default=True, help='keep soft alpha from the segmenter when the input has no alpha channel (default on)')
+    parser.add_argument('--edge_refine', action='store_true', help='for images that already have alpha, run the segmenter and refine only the 3 px edge band (default off)')
     parser.add_argument('--ragdoll_split', action='store_true', help='split completed limbs into overlapping RTMPose-guided bone layers')
     parser.add_argument('--ragdoll-overlap', type=float, default=0.2,
                         help='joint overlap as a fraction of the shorter adjacent bone')
@@ -131,12 +196,12 @@ if __name__ == '__main__':
         print(f'[{index}/{len(imglist)}] preparing {srcp}', flush=True)
         with Image.open(srcp) as source:
             has_mask = 'A' in source.getbands() and source.getchannel('A').getextrema()[0] < 255
-        if not has_mask and mask_model is None:
+        if (not has_mask or args.edge_refine) and mask_model is None:
             print('loading foreground segmenter...')
             mask_model = load_refinenet('animeseg')
         srcname = osp.basename(osp.splitext(srcp)[0])
         saved = osp.join(args.save_dir, srcname)
-        cropped, bbox = save_masked_input(srcp, saved, mask_model, args.mask_resolution)
+        cropped, bbox = save_masked_input(srcp, saved, mask_model, args.mask_resolution, args.edge_refine, args.soft_alpha)
         print(f'cropped input saved to {cropped} (bbox={bbox})')
         prepared.append((srcp, cropped, srcname))
 

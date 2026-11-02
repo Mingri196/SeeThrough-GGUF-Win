@@ -86,7 +86,11 @@ uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 | LayerDiff3D（图层分解） | `icefog72/seethroughv0.0.2_layerdiff3d_gguf` | `models/layerdiff3d-Q5_1.gguf` |
 | Marigold3D（深度）    | `icefog72/seethroughv0.0.1_marigold_gguf`    | `models/marigold3d-Q8_0.gguf`  |
 
-把下载好的两个 GGUF 放进 `models/`（可以建子目录，例如 `models/layerdiff3d/`、`models/marigold3d/`），页面「模型选择」会递归扫描并按完整路径列出。或者直接让脚本代下：
+把下载好的两个 GGUF 放进 `models/`（可以建子目录，例如 `models/layerdiff3d/`、`models/marigold3d/`），页面「模型选择」会递归扫描并按完整路径列出。
+
+也支持**原版 diffusers 目录**（`safetensors` 那套，文件夹里带 `model_index.json`）：把整个目录放进 `models/` 即可，套一层子目录也能识别，页面会一并列出并按名字自动判断是图层还是深度模型。目录形式不传 `--quantized`，对应的「GGUF 量化」开关会自动置灰。
+
+或者直接让脚本代下：
 
 ```bat
 :: 下载两个主模型 + 辅助组件
@@ -114,8 +118,8 @@ uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 | 步骤          | 内容                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **01 图像**   | 拖拽或点选图片，支持 **PNG / JPG / WEBP / BMP**。立即校验扩展名、体积、可解码性，显示缩略图、文件名、体积与像素尺寸；可随时移除或换图，换图会清空上一张的结果与任务痕迹                                                                                                                                                                                                                                                                                                                                                                |
-| **02 参数**   | 宽/高（同步，64 的倍数）、推理步数、种子模式、**输出图层**（24 个 tag 按身体组/头部组勾选，默认全选）、`tblr_split` / `use_lama` / `layer_fix` / `save_to_psd` 开关、高级项（量化流式、深度步数、深度分辨率、前景分割分辨率、注意力后端、骨骼切割、骨骼置信度、关节重叠、保留切图与骨架清单）                                                                                                                                                                                                                                                                              |
-| **03 模型选择** | 递归扫描 `models/`（含子目录），分别选「图层模型」和「深度模型」；下拉框显示相对路径（如 `marigold3d/marigold3d-Q5_1.gguf`），同名的不同量化档不会混淆；换档位不用改 `config.json`。可点「重新扫描」刷新。「模型常驻」（默认开）让模型留在显存里，下一轮省掉约 40–75 秒加载；「分组卸载」（默认关）按组在 CPU / GPU 间搬权重，更省显存但更慢                                                                                                                                                                                                                                                     |
+| **02 参数**   | 宽/高（同步，64 的倍数）、推理步数、种子模式、**输出图层**（24 个 tag 按身体组/头部组勾选，默认全选）、`tblr_split` / `use_lama` / `layer_fix` / `save_to_psd` 开关、**边缘精修 / 透明图也精修**（见下表 `soft_alpha`、`edge_refine`）、高级项（量化流式、深度步数、深度分辨率、前景分割分辨率、注意力后端、骨骼切割、骨骼置信度、关节重叠、保留切图与骨架清单）                                                                                                                                                                                                                                                                              |
+| **03 模型选择** | 递归扫描 `models/`（含子目录）的 `.gguf` 与含 `model_index.json` 的 diffusers 目录，分别选「图层模型」和「深度模型」；下拉框显示相对路径（如 `marigold3d/marigold3d-Q5_1.gguf`），同名的不同量化档不会混淆；换档位不用改 `config.json`。可点「重新扫描」刷新。「模型常驻」（默认开）让模型留在显存里，下一轮省掉约 40–75 秒加载；「分组卸载」（默认关）按组在 CPU / GPU 间搬权重，更省显存但更慢                                                                                                                                                                                                                                                     |
 | **04 运行**   | 开始 / 取消；下方固定显示本次分辨率、步数、实际种子、耗时                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | **成像台**     | 右上角「后处理重跑」（浮层：左右分割 / 骨骼切割 / 置信度 / 关节重叠 / PSD / 切图，只重跑后处理不重采样）+ 真实输出缩略图（点击看原图）+ PSD 行（「打开文件夹」直接打开该任务的 `out/`）+ 清单条（`cuts/manifest.json`、`pose_keypoints.json` 等 JSON 可直接下载）+ **关节置信度**条（骨骼切割后自动列出低于门限的关节）；下方是常驻日志控制台                                                                                                                                                                                                                                              |
 | **设置页**     | 顶栏「设置」打开新标签页 `/settings`，左侧固定侧栏三页（整页中英双语，跟随工作台的 CN/EN **实时切换**）：**环境信息**（Python / torch / CUDA / 显卡与显存 / 驱动 / 系统 / CPU / 内存 / 下载源与握手耗时 / 路径 / **组件缓存位置与体积** / 模型清单 / 补丁与开关 / 磁盘，右上角「复制诊断」）、**启动与端口**（监听地址与本机/局域网判定、配置端口、**更改地址 / 更改端口**并写回 config.json（自动备份 `config.json.bak`，重启后生效）、PID 与运行时长、config.json 路径与最后修改时间）、**维护与诊断**（服务状态、.venv / STM 代码 / 两个主模型 / 三个补丁的完整性检查、任务数与占用，打开 outputs / models / 项目根，以及右上角「打开命令提示符」——调 `3-env.bat` 弹一个已激活 `.venv` 的 cmd 窗口，仅本机可用）。全部只读，不改配置 |
@@ -152,7 +156,9 @@ uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 | `save_cut_images`       | bool                  | 默认 **`true`**           | 额外输出 `cuts/` 逐层 RGBA 切片与 `cuts/manifest.json`（轴心、骨骼、父子关系、关节重叠）                                                                                                                      |
 | `group_offload`         | bool                  | 默认 `false`              | 按组在 CPU / GPU 间搬权重，更省显存但更慢；与流式加载作用重叠                                                                                                                                                |
 | `layer_fix`             | bool                  | 默认 **`true`**           | 图层修补（后处理补丁，不重画像素）：① 贴画布下沿的层（典型是鞋子）不再被「空层判定」误杀；② 眼睛按 眼白→虹膜→睫毛 固定叠放，避免眼白发白；③ 掩码索引改用布尔掩码，修掉左右分割时的 `IndexError` 崩溃                                                                                                            |
-| `quantized`             | bool                  | 默认 **`true`**           | 打开 GGUF 量化 + 流式加载；关闭后整份权重进显存                                                                                                                                                        |
+| `quantized`             | bool                  | 默认 **`true`**           | GGUF 量化：权重以量化格式留在显存、计算时按需反量化。关闭后权重会被解量化到内存，再逐算子搬到显卡计算——显存占用反而更低，但速度慢数十倍，画质不变                                                                                       |
+| `soft_alpha`            | bool                  | 默认 **`true`**           | 边缘精修（主）。无 alpha 的图保留分割器输出的概率过渡，只在 0.5 边界 ±6 像素内生效，其余强制 0/255；关掉则退回上游的 `(prob >= 0.5) * 255` 硬二值                                                                                    |
+| `edge_refine`           | bool                  | 默认 `false`              | 透明图也精修（从属）。带 alpha 的图额外跑一次分割器，只替换边缘 ±3 像素，内部不动；`soft_alpha` 关闭时后端强制置 `false`                                                                                                   |
 | `layerdiff_model`       | str                   | `models/` 下的相对路径，可选     | 图层模型；缺省时用 `config.json` 的 `layerdiff_gguf`                                                                                                                                          |
 | `keep_model`            | bool                  | 默认 **`true`**           | 模型常驻：任务结束后保留模型在显存，下一轮免加载；关闭则每轮重新加载并立即释放显存                                                                                                                                           |
 | `depth_model`           | str                   | `models/` 下的相对路径，可选     | 深度模型；缺省时用 `config.json` 的 `depth_gguf`                                                                                                                                              |
@@ -165,7 +171,7 @@ uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 | ------ | ------------------------------- | ---------------------------------------------------------------------------------- |
 | GET    | `/api/config`                   | 默认值、约束范围、支持扩展名、上传上限                                                                |
 | GET    | `/api/check_models`             | 默认 GGUF、STM 仓库、LaMa 补丁与网络状态                                                        |
-| GET    | `/api/models`                   | 递归扫描 `models/` 的 `.gguf` 列表（含角色推断与默认项）                                             |
+| GET    | `/api/models`                   | 递归扫描 `models/` 的 `.gguf` 与 diffusers 目录（含角色推断、`kind` 与默认项）                                         |
 | GET    | `/api/stream/<job_id>`          | SSE：`event: log`（`{ts, level, msg}`）+ `event: done`（状态、输出、耗时）                      |
 | GET    | `/api/status/<job_id>`          | 轮询兜底，含末 200 行日志                                                                    |
 | POST   | `/api/jobs/<job_id>/cancel`     | 终止进程树，状态置 `canceled`                                                               |
@@ -196,7 +202,7 @@ if not quantized:
     stream = False
 ```
 
-也就是说，不传 `--quantized` 时 GGUF 会被整体反量化后加载，**流式加载被静默关闭**——6 GB 卡上正是这样爆显存的。本项目默认传入该参数，并在界面高级项里暴露开关。
+也就是说，不传 `--quantized` 时 GGUF 会被整体反量化（`float16`，CC < 8.0 的卡）后放进**内存**，再由 `enable_streamed_gpu_compute()` 逐算子搬到显卡计算：6 GB 卡因为低于 8 GB 门槛，只能走最慢的 `leaf_level`，同步 PCIe 拷贝。结果是显存占用反而低（约 1.8 GB）、内存吃紧、**每步慢到数十秒**——不是 OOM，而是几乎不可用。本项目默认传入该参数，并在界面高级项里暴露开关。
 
 ### 5.2 `use_lama` 补丁
 
@@ -251,7 +257,7 @@ STM 的后处理默认总是用 LaMa 修补（`cluster_inpaint_part(..., inpaint
 | 显存不足 / 被系统内存拖死                                                            | 确认高级项里「GGUF 量化 + 流式加载」为开（默认），并降低分辨率到 720 / 步数降到 20 左右                                                                                                                                                                                                                                                             |
 | 任务结束后显存仍被占用                                                               | 「模型常驻」（03 模型选择里，默认开）保留了模型。关掉它再跑一轮即可释放；取消任务也会顺带结束常驻进程                                                                                                                                                                                                                                                              |
 | 日志长时间不刷新但任务在跑                                                             | 部分安全软件会缓冲 SSE；页面每 1.5 秒轮询 `/api/status` 兜底，属正常。采样期间日志会显示 `进度 12/30 · 40% · 37.2s/it`，卡住不动才是真卡住                                                                                                                                                                                                                    |
-| 一步要好几分钟、GPU 100% 但功耗只有 40–50 W                                            | 分辨率把显存档位挤进了 `streamed`：权重每层都从内存经 PCIe 搬一次，GPU 大半时间在等数据。降分辨率到 768 即可切回 `resident`，6 GB 显存设备实测 **1024 约 300 s/步 → 768 约 37 s/步**                                                                                                                                                                                    |
+| 一步要好几分钟、GPU 100% 但功耗只有 40–50 W                                            | 分辨率把显存档位挤进了 `streamed`：权重每层都从内存经 PCIe 搬一次，GPU 大半时间在等数据。降分辨率到 768 即可切回 `resident`，6 GB 显存设备实测 **1024 约 300 s/步 → 768 约 37 s/步**。若关掉了「GGUF 量化 + 流式加载」，768 也会退化到 `leaf_level` 逐算子搬运，同样极慢且不会 OOM——把它打开即可                                                                                                                                                                                    |
 | 想试 `torch.compile` 的反量化加速（只有 CC ≥ 7.0 的卡有意义）                              | 双击 `4-install_triton.bat`：它会检测环境 → 推导匹配的 Triton 版本 → 测速选源 → 安装 → 用**真实反量化 kernel** 做冒烟测试，通过才把 `compile_dequant` 置为 `true`。再运行一次可保留/卸载/重装。CC 低于 7.0 的卡会被明确提示「不达标」，装完也不会启用。命令与排错见 [docs/triton-windows.md](docs/triton-windows.md)；不想自己动手就把 [docs/triton-windows-ai.md](docs/triton-windows-ai.md) 整份丢给 AI，让它按任务书代劳 |
 | 端口被占用 | 改 `config.json` 的 `port`，或关掉占用 7860 的进程 |
 | 更新后 `config.json` 不见了，或 `git pull` 报 `Your local changes to config.json would be overwritten` | **自 2026-11-02 起**，`config.json` 不再纳入仓库（避免各自改过的端口与路径被提交、互相覆盖），随代码提供的是 `config.example.json`，首次启动会自动生成 `config.json`。从旧版本更新上来：pull 前先把自己改过的 `config.json` 备份为 `config.json.bak`，pull 后启动一次让新版写出默认配置，再把端口、路径等自定义项合并回去 |
@@ -313,7 +319,7 @@ SeeThrough-GGUF-Win/
 │   ├── triton-windows.en.md   # 上一份的英文版
 │   └── triton-windows-ai.md   # 同一件事的任务书：整份交给 AI，让它代劳
 ├── stm/                       # 上游代码快照（Apache-2.0，已内置并打补丁）
-├── models/                    # GGUF（自行下载，不入库）
+├── models/                    # 模型（GGUF 或 diffusers 目录，自行下载，不入库）
 ├── components/                # 首次推理的辅助组件（HF / torch.hub，不入库，1-setup.bat 自动创建）
 ├── outputs/jobs/<id>/         # 每次任务的输入、输出、meta.json（不入库）
 └── licenses/

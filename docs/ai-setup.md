@@ -166,9 +166,12 @@ uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 
 **B. 用户自己下载后放进 `models/`**
 
-可以是子目录（如 `models\layerdiff3d\xxx-Q4_K_M.gguf`），页面会递归扫描。**文件名不必等于默认值**——只要在页面 03 里选中即可，不要为了「对上默认值」去改文件名或改 `config.json`。
+两种形态都支持：
 
-**验收**：`models\` 下至少两个 `.gguf`，且分别能对上「图层」「深度」两种角色（页面会按文件名推断，Q5_1/Q4_K_M/Q8_0 等量化档都行）。
+- **GGUF 单文件**：可以是子目录（如 `models\layerdiff3d\xxx-Q4_K_M.gguf`），页面会递归扫描。**文件名不必等于默认值**——只要在页面 03 里选中即可，不要为了「对上默认值」去改文件名或改 `config.json`。
+- **原版 diffusers 目录**（`safetensors` 那套）：整个文件夹放进 `models/`，文件夹里必须有 `model_index.json`；套一层子目录也能识别（如 `models\original\seethroughv0.0.2_layerdiff3d\model_index.json`）。目录内部不再下钻，`unet\`、`vae\` 不会被误当成模型。
+
+**验收**：`models\` 下至少两个模型（`.gguf` 或含 `model_index.json` 的目录），且分别能对上「图层」「深度」两种角色（页面按名字推断：含 `marigold`/`depth` 记为深度，含 `layerdiff`/`seethrough` 记为图层）。
 
 ---
 
@@ -198,7 +201,7 @@ curl -s http://127.0.0.1:7860/api/config
 |---|---|---|---|
 | 1 | 配置接口 | `curl -s http://127.0.0.1:7860/api/config` | 返回默认值、约束范围、支持的扩展名 |
 | 2 | 模型与补丁状态 | `curl -s http://127.0.0.1:7860/api/check_models` | `layerdiff` / `depth` 都存在；`patch` 显示已打；网络状态正常 |
-| 3 | 模型列表 | `curl -s http://127.0.0.1:7860/api/models` | 至少两项，路径形如 `layerdiff3d\xxx.gguf` |
+| 3 | 模型列表 | `curl -s http://127.0.0.1:7860/api/models` | 至少两项，`kind` 为 `gguf` 或 `dir`，路径形如 `layerdiff3d\xxx.gguf` / `seethroughv0.0.2_layerdiff3d` |
 | 4 | 页面能开 | 浏览器 `http://127.0.0.1:7860` | 01–04 四步界面，顶部无红条（有红条就是模型缺失） |
 | 5 | 真跑一张 | 见 6.3 | 状态「完成」，成像台出现缩略图 + PSD 下载 |
 
@@ -239,8 +242,8 @@ curl -s http://127.0.0.1:7860/api/status/<job_id>
 | 步骤 | 用户要做什么 |
 |---|---|
 | **01 图像** | 拖拽或点选一张人物图（PNG / JPG / WEBP / BMP）。会即时校验扩展名、体积、可解码性，显示缩略图与像素尺寸；换图会清空上一轮结果 |
-| **02 参数** | 宽/高（同步，64 的倍数）、推理步数、种子（固定/随机）、**输出图层**（24 个 tag，身体组 13 + 头部组 11，默认全选；默认收起，点「展开」才显示勾选项）、四个开关：部件左右分割 `tblr_split`、LaMa 修补 `use_lama`、图层修补 `layer_fix`、导出 PSD `save_psd`；高级项里有：GGUF 量化流式、深度步数、深度分辨率、前景分割分辨率、注意力后端（native / xformers）、骨骼切割、骨骼置信度、关节重叠、保留切图与骨架清单 |
-| **03 模型选择** | 分别选「图层模型」「深度模型」（下拉显示 `models/` 下的相对路径，同名的不同量化档不会混）；「模型常驻」默认开，下一轮省 40–75 秒加载；「分组卸载」默认关（更省显存、更慢）；模型换了点「重新扫描」 |
+| **02 参数** | 宽/高（同步，64 的倍数）、推理步数、种子（固定/随机）、**输出图层**（24 个 tag，身体组 13 + 头部组 11，默认全选；默认收起，点「展开」才显示勾选项）、六个开关：边缘精修 `soft_alpha`（主，默认开）、透明图也精修 `edge_refine`（从属，默认关，主开关关闭时置灰不可点）、部件左右分割 `tblr_split`、LaMa 修补 `use_lama`、图层修补 `layer_fix`、导出 PSD `save_psd`；高级项里有：GGUF 量化流式、深度步数、深度分辨率、前景分割分辨率、注意力后端（native / xformers）、骨骼切割、骨骼置信度、关节重叠、保留切图与骨架清单 |
+| **03 模型选择** | 分别选「图层模型」「深度模型」（下拉显示 `models/` 下的相对路径，`.gguf` 与 diffusers 目录都会列出，同名的不同量化档不会混；选中目录时「GGUF 量化」开关自动置灰）；「模型常驻」默认开，下一轮省 40–75 秒加载；「分组卸载」默认关（更省显存、更慢）；模型换了点「重新扫描」 |
 | **04 运行** | 点开始；下方常驻日志控制台（时间 + 级别 + 内容），以及本次分辨率、步数、实际种子、耗时 |
 | **成像台** | 真实输出缩略图（点开看原图）+ PSD 行（「打开文件夹」直接打开该任务的 `out/`）+ 清单条（`cuts/manifest.json`、`pose_keypoints.json` 可直接下载）+ 关节置信度条；右上角「后处理重跑」（只重跑后处理，不重采样） |
 | **设置页** | 顶栏「设置」打开 `/settings`（中英双语，跟随工作台 CN/EN 实时切换）：环境信息（含组件缓存路径与体积、复制诊断）、启动与端口（改 host / port 写回 `config.json`，重启生效）、维护与诊断（完整性检查、打开 outputs / models / 项目根、打开命令提示符） |
@@ -297,7 +300,7 @@ SeeThrough-GGUF-Win/
 │   ├── triton-windows-ai.md   # Triton 操作任务书（给 AI）
 │   └── screenshots/           # 界面截图（workbench / settings，中英各一套）
 ├── stm/                       # 上游代码快照（Apache-2.0，已打 use_lama 与图层修补补丁）
-├── models/                    # GGUF 权重（不入库，自己放）
+├── models/                    # 模型权重：GGUF 或 diffusers 目录（不入库，自己放）
 ├── components/                # 首次推理的辅助组件（HF / torch.hub，不入库，自动创建）
 └── outputs/jobs/<id>/         # 每轮任务的输入、输出、meta.json（不入库）
 ```
@@ -326,7 +329,7 @@ SeeThrough-GGUF-Win/
 |---|---|---|
 | GET | `/api/config` | 默认值、约束、支持的扩展名、上传上限 |
 | GET | `/api/check_models` | 默认 GGUF、STM 仓库、LaMa 补丁、网络状态 |
-| GET | `/api/models` | 递归扫描 `models/` 的 `.gguf` 列表 |
+| GET | `/api/models` | 递归扫描 `models/` 的 `.gguf` 与 diffusers 目录（每项带 `kind`：`gguf` / `dir`） |
 | POST | `/api/run` | 提交任务（`multipart`：`image` + `params` JSON） |
 | GET | `/api/stream/<job_id>` | SSE：`event: log` + `event: done` |
 | GET | `/api/status/<job_id>` | 轮询兜底，含末 200 行日志 |
@@ -343,9 +346,9 @@ SeeThrough-GGUF-Win/
 | POST | `/api/config-file` | 把 `host` / `port` 写回 `config.json`（备份为 `.bak`，重启生效；仅本机） |
 | POST | `/api/open-folder` | 打开项目内目录：`root` / `outputs` / `models` / `stm`（仅本机） |
 
-`params` 关键字段：`width` / `height`（256–2048，64 倍数，必须相等）、`inference_steps`（1–150，默认 30）、`inference_steps_depth`（默认 4）、`resolution_depth`（`"auto"` / -1 / 64 倍数）、`mask_resolution`（`"auto"` / 256–4096）、`attention_backend`（`native` / `xformers`）、`seed_mode`（`fixed` / `random`）、`seed`、`tblr_split`、`use_lama`、`save_psd`、`ragdoll_split`、`ragdoll_confidence`、`ragdoll_overlap`、`parts`（数组，`null` = 全量）、`save_cut_images`、`layer_fix`、`group_offload`、`quantized`（**默认必须 true**）、`keep_model`、`layerdiff_model` / `depth_model`（`models/` 下相对路径）。
+`params` 关键字段：`width` / `height`（256–2048，64 倍数，必须相等）、`inference_steps`（1–150，默认 30）、`inference_steps_depth`（默认 4）、`resolution_depth`（`"auto"` / -1 / 64 倍数）、`mask_resolution`（`"auto"` / 256–4096）、`attention_backend`（`native` / `xformers`）、`seed_mode`（`fixed` / `random`）、`seed`、`tblr_split`、`use_lama`、`save_psd`、`ragdoll_split`、`ragdoll_confidence`、`ragdoll_overlap`、`parts`（数组，`null` = 全量）、`save_cut_images`、`layer_fix`、`group_offload`、`quantized`（**默认必须 true**）、`soft_alpha`（边缘精修主开关，默认 true）、`edge_refine`（透明图也精修，默认 false，主开关关闭时后端强制置 false）、`keep_model`、`layerdiff_model` / `depth_model`（`models/` 下的相对路径：`.gguf` 文件或 diffusers 目录都行）。
 
-> `quantized` 不是可选项：STM 里 `if not quantized: stream = False`，不传它会关掉流式加载、整份权重挤进显存——6 GB 卡就是这样爆的。
+> `quantized` 不是可选项：STM 里 `if not quantized: stream = False`，不传它会把 GGUF 整体解量化成 `float16` 放进**内存**，再由 `enable_streamed_gpu_compute()` 逐算子搬到显卡。6 GB 卡低于 8 GB 门槛，只能走最慢的 `leaf_level` + 同步 PCIe 拷贝：显存占用反而降到约 1.8 GB，但内存吃紧、每步数十秒——不是 OOM，是几乎不可用。
 
 ---
 
@@ -356,7 +359,7 @@ SeeThrough-GGUF-Win/
 | `no kernel image is available for execution on the device` | PyTorch 轮子不含本机架构（Pascal = sm_61，torch 2.9+ 的 cu128 已不含） | 重装 `requirements-torch.txt`（torch 2.8.0+cu128）；`backend\selfcheck.py` 会打印 `编译架构` 列表，对不上就会警告 |
 | 首次推理卡在下载 | 辅助组件没预取全，仍在访问 Hugging Face | 服务启动会探测并写入 `HF_ENDPOINT`；国内可 `config.json` 设 `hf_endpoint` 为 `https://hf-mirror.com` |
 | `CERTIFICATE_VERIFY_FAILED: self-signed certificate` | 安全软件 / 企业代理做 HTTPS 中间人 | 程序会自动合并系统根证书到 `outputs/.cache/ca-bundle.pem`；下载脚本还有 `curl` 回退 |
-| 显存不足 / 被系统内存拖死 | 关了量化流式，或分辨率过高 | 确认高级项「GGUF 量化 + 流式加载」为开；降到 720 / 步数 20 |
+| 显存不足 / 被系统内存拖死 | 分辨率过高；或关掉了量化（关量化后权重进内存，表现为内存吃紧 + 每步数十秒，而不是 OOM） | 确认高级项「GGUF 量化 + 流式加载」为开；降到 720 / 步数 20 |
 | 一步几分钟、GPU 100% 但功耗低 | 掉进 `streamed` 档，权重每层经 PCIe 搬运 | 降到 768 切回 `resident` |
 | 任务结束后显存仍被占用 | 「模型常驻」保留着模型 | 03 里关掉常驻再跑一轮；取消任务也会结束常驻进程 |
 | 日志长时间不刷新但任务在跑 | 安全软件缓冲 SSE | 页面每 1.5 s 轮询兜底，属正常；卡住不动才是真卡住 |

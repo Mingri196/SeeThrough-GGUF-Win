@@ -1,10 +1,10 @@
 # 修改声明 / Modifications
 
-本项目对上游 [IceFog72/see-through-gguf](https://github.com/IceFog72/see-through-gguf) 的代码做了**最小、可逆**的修改，用于把「LaMa 修补」暴露成一个真正的命令行开关，并修复三处后处理缺陷（贴边图层被误判为空层、眼白盖住虹膜、掩码索引用错类型导致崩溃）。
+本项目对上游 [IceFog72/see-through-gguf](https://github.com/IceFog72/see-through-gguf) 的代码做了**最小、可逆**的修改，用于把「LaMa 修补」「边缘精修」暴露成真正的命令行开关，并修复三处后处理缺陷（贴边图层被误判为空层、眼白盖住虹膜、掩码索引用错类型导致崩溃）。
 
 - 上游基线：`02cba07`（2026-09-14，*feat: add ragdoll confidence parameter and post-processing script*）
 - 修改者：Mingri196（<https://github.com/Mingri196/SeeThrough-GGUF-Win>，非上游作者，修改未获上游背书）
-- 修改日期：2026-10-29（LaMa 开关）、2026-10-30（图层修补）
+- 修改日期：2026-10-29（LaMa 开关）、2026-10-30（图层修补）、2026-11-02（边缘精修）
 - 许可证：Apache-2.0，全文见根目录 [LICENSE](LICENSE)
 
 ## 被修改的文件
@@ -24,9 +24,14 @@
 
 | 位置 | 改动 |
 |---|---|
-| 文件首行 | 增加标记注释 `# __STG_PATCHED_INFERENCE_PSDPY__` |
-| 参数定义区 | 新增 `parser.add_argument('--use_lama', action=argparse.BooleanOptionalAction, default=True, help='use LaMa inpainting during post-processing (default on)')` |
+| 文件首行 | 两个标记注释：`# __STG_PATCHED_INFERENCE_PSDPY__`、`# __STG_PATCHED_INFERENCE_PSDPY_EDGE_REFINE__`（供补丁幂等判断） |
+| 参数定义区 | `--use_lama`（`BooleanOptionalAction`，默认 `True`）、`--soft_alpha`（`BooleanOptionalAction`，**默认 `True`**）、`--edge_refine`（`store_true`，**默认 `False`**） |
 | 调用 `further_extr()` 处 | 传入 `use_lama=args.use_lama` |
+| `save_masked_input()` 签名 | 末尾新增参数 `edge_refine=False, soft_alpha=True` |
+| `save_masked_input()` 无 alpha 分支 | `soft_alpha` 打开（默认）时用 `_stg_soft_alpha()` 保留边缘过渡；`--no-soft_alpha` 退回上游的 `(prob >= 0.5) * 255` |
+| `save_masked_input()` 有 alpha 分支 | `edge_refine` 打开时也跑一次分割器，再交给 `_stg_refine_alpha_band()` |
+| 新增 `_stg_refine_alpha_band()` | 只把分割器概率写进原 alpha 的边缘带（±3 px），带宽之外保持用户原值 |
+| main 循环 | 传 `args.edge_refine`；打开时带 alpha 的图也会加载分割器 |
 
 ### 3. `common/utils/io_utils.py`（图层修补）
 
@@ -39,6 +44,9 @@
 
 - 除上述三个文件外，没有对其他上游文件做任何修改；`seg_wdepth()` / `seg_wdepth_psd()` 中的另外两处 `cluster_inpaint_part` 调用保持原样。
 - `use_lama` 默认值 `True` 与上游原行为一致：即使不传该参数，仍使用 LaMa。
+- **`--soft_alpha` 默认开启**，这是与上游唯一的默认行为差异：无 alpha 的输入默认保留分割器的连续概率，边缘不再被 `0.5` 硬切成锯齿。要完全回到上游行为，传 `--no-soft_alpha`（注意是下划线：`BooleanOptionalAction` 的否定名跟随参数名本身，连字符写法会被 argparse 判为未知参数）。
+- `--edge_refine` 默认**关闭**，且**只影响已带 alpha 的图**：打开后才会额外跑一次分割器并只替换边缘 ±3 像素。
+- Web 界面映射成主从两个开关：主「边缘精修」→ `--soft_alpha`（默认开）；其下的从属开关「透明图也精修」→ `--edge_refine`（默认关）。主开关关闭时从属项置灰不可点，后端也会把 `edge_refine` 强制回 `false`。
 - **图层修补**的三处改动都由环境变量 `STG_LAYER_FIX` 控制（默认开启），Web 界面的「图层修补」开关按任务注入。该变量支持细粒度取值：`0` / `off` = 全关（完全等同上游原始行为）、`1` / `on` = 全开，也可以写成 `drop` / `order` / `mask` / `drop,order` 只开其中几项（分别对应下面三处修复）：
   - **丢层**：原判定先裁掉底部/右侧 10% 条带再数 alpha 像素，贴着画布下沿的层（典型是鞋子，bbox 常正好到 768 底边）会被整体算成 0 而整层丢弃。改为统计整张 mask。
   - **叠序**：`depth_median` 排序在眼睛三层深度极接近时（实测 eyewhite 0.341 / irides 0.349）会颠倒，导致眼白盖住虹膜。改为把这三层收拢后按 `eyewhite → irides → eyelash` 固定顺序排列，整体位置不变。

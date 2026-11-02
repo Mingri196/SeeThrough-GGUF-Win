@@ -213,6 +213,25 @@
             </span>
           </label>
 
+          <div class="switch-stack">
+            <label class="switch">
+              <input type="checkbox" id="softAlpha" checked />
+              <span class="switch-track" aria-hidden="true"></span>
+              <span class="switch-copy">
+                <b data-i18n="toggle.edgeRefine" data-i18n-tip="tip.edgeRefine">边缘精修</b>
+                <small>soft_alpha</small>
+              </span>
+            </label>
+            <label class="switch switch-sub" id="edgeRefineSwitch">
+              <input type="checkbox" id="edgeRefine" />
+              <span class="switch-track" aria-hidden="true"></span>
+              <span class="switch-copy">
+                <b data-i18n="toggle.edgeRefineAlpha" data-i18n-tip="tip.edgeRefineAlpha">透明图也精修</b>
+                <small>edge_refine</small>
+              </span>
+            </label>
+          </div>
+
           <label class="switch" id="lamaSwitch">
             <input type="checkbox" id="useLama" checked />
             <span class="switch-track" aria-hidden="true"></span>
@@ -249,7 +268,7 @@
             <span class="switch-track" aria-hidden="true"></span>
             <span class="switch-copy">
               <b data-i18n="toggle.quantized">GGUF 量化 + 流式加载</b>
-              <small data-i18n="toggle.quantizedNote">关闭后整份权重进显存，6 GB 卡易 OOM</small>
+              <small data-i18n="toggle.quantizedNote">关闭后权重解量化到内存、逐算子搬运，慢数十倍且画质不变</small>
             </span>
           </label>
 

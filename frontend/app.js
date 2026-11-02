@@ -109,11 +109,13 @@
 
       "toggle.tblr": "左右对称分割",
       "toggle.lama": "LaMa 修补",
+      "toggle.edgeRefine": "边缘精修",
+      "toggle.edgeRefineAlpha": "透明图也精修",
       "toggle.layerFix": "图层修补",
       "toggle.layerFixNote": "修贴边图层被丢、眼白盖住虹膜",
       "toggle.psd": "导出 PSD",
       "toggle.quantized": "GGUF 量化 + 流式加载",
-      "toggle.quantizedNote": "关闭后整份权重进显存，6 GB 卡易 OOM",
+      "toggle.quantizedNote": "关闭后权重解量化到内存、逐算子搬运，慢数十倍且画质不变",
       "toggle.ragdoll": "骨骼切割",
       "toggle.ragdollNote": "RTMPose 肢体分层；姿态模型已随安装预取",
       "toggle.confidence": "骨骼置信度",
@@ -135,6 +137,8 @@
       "action.partsCollapse": "收起",
       "tip.tblr": "把部件拆成左右两半（如左手 / 右手分开）",
       "tip.lama": "用神经网络补全被抠出的边缘空洞",
+      "tip.edgeRefine": "无 alpha 的图保留抠图模型输出的渐变过渡,不再被 0.5 一刀切出锯齿",
+      "tip.edgeRefineAlpha": "开启后带 alpha 的图只修边缘 3 像素,内部不动;主开关关闭时不生效",
       "tip.layerFix": "修掉后处理阶段的几处已知缺陷",
       "tip.psd": "导出可编辑的 Photoshop 分层文件",
       "toggle.lamaUnavailable": "未打补丁，此开关固定开启",
@@ -332,11 +336,13 @@
 
       "toggle.tblr": "Left/right split",
       "toggle.lama": "LaMa inpaint",
+      "toggle.edgeRefine": "Edge refine",
+      "toggle.edgeRefineAlpha": "Refine alpha images",
       "toggle.layerFix": "Layer fixes",
       "toggle.layerFixNote": "Recovers clipped-edge layers and fixes eye layer order",
       "toggle.psd": "Export PSD",
       "toggle.quantized": "GGUF quantized + streamed",
-      "toggle.quantizedNote": "Turning this off loads full weights into VRAM — 6 GB cards will OOM",
+      "toggle.quantizedNote": "Off: weights dequantized into RAM, moved per operator; many times slower, same quality",
       "toggle.ragdoll": "Ragdoll split",
       "toggle.ragdollNote": "RTMPose limb layers; pose models are prefetched by setup",
       "toggle.confidence": "Pose confidence",
@@ -358,6 +364,8 @@
       "action.partsCollapse": "Collapse",
       "tip.tblr": "Split parts into left and right halves (e.g. separate hands)",
       "tip.lama": "Fill the holes left by the cut-out using a neural inpainter",
+      "tip.edgeRefine": "For images without alpha: keeps the segmenter soft probabilities instead of a hard 0.5 cut.",
+      "tip.edgeRefineAlpha": "With alpha: refines only the 3 px edge band when on, interior untouched. Ignored while the main switch is off.",
       "tip.layerFix": "Repair a few known defects in the post-processing stage",
       "tip.psd": "Export an editable layered Photoshop file",
       "toggle.lamaUnavailable": "STM not patched — this switch is forced on",
@@ -1115,6 +1123,18 @@
     return node ? node.value : "";
   }
 
+  // 目录形态（原版 safetensors）没有量化权重，「GGUF 量化 + 流式加载」对它无意义。
+  // 只禁用不改勾选值，切回 GGUF 时原设置还在。
+  function syncQuantizedState() {
+    const node = el("quantized");
+    if (!node) return;
+    const rel = selectedModel("layerdiff");
+    const isGguf = !rel || rel.toLowerCase().endsWith(".gguf");
+    node.disabled = !isGguf;
+    const wrap = node.closest(".switch");
+    if (wrap) wrap.classList.toggle("is-disabled", !isGguf);
+  }
+
   function modelFullPath(rel) {
     const base = (state.modelInfo && state.modelInfo.models_dir) || "";
     return rel ? (base ? base + "\\" + rel.replace(/\//g, "\\") : rel) : "";
@@ -1161,6 +1181,7 @@
       localStorage.setItem("stg.model." + role, node.value);
     });
 
+    syncQuantizedState();
     if (state.models) renderModels(state.models);
     updateModelNotice();
     validateInline();
@@ -1214,6 +1235,7 @@
         ? formatBytes(entry.size)
         : t("models.none");
       setFieldError(role === "layerdiff" ? "modelLayer" : "modelDepth", "");
+      if (role === "layerdiff") syncQuantizedState();
       if (state.models) renderModels(state.models);
       updateModelNotice();
       validateInline();
@@ -1565,6 +1587,8 @@
       attention: state.attnBackend,
       tblr_split: el("tblrSplit").checked,
       use_lama: el("useLama").checked,
+      soft_alpha: el("softAlpha").checked,
+      edge_refine: el("edgeRefine").checked,
       layer_fix: el("layerFix").checked,
       save_psd: el("savePsd").checked,
       quantized: el("quantized").checked,
@@ -1587,6 +1611,25 @@
   }
 
   // 叠加在 applyDefaults 之上：越界或非法的值一律丢弃，保留默认
+  // 主开关关闭时，从属开关不可操作：带 alpha 的精修以「边缘精修」开启为前提
+  function syncEdgeRefineState() {
+    const main = el("softAlpha");
+    const sub = el("edgeRefine");
+    const wrap = el("edgeRefineSwitch");
+    if (!main || !sub) return;
+    const on = main.checked;
+    sub.disabled = !on;
+    if (!on) sub.checked = false;
+    if (wrap) wrap.classList.toggle("is-disabled", !on);
+  }
+
+  function initEdgeRefineToggle() {
+    const main = el("softAlpha");
+    if (!main) return;
+    main.addEventListener("change", syncEdgeRefineState);
+    syncEdgeRefineState();
+  }
+
   function applySavedParams() {
     const saved = readSavedParams();
     const c = constraints();
@@ -1646,6 +1689,9 @@
 
     setChecked("tblrSplit", saved.tblr_split);
     setChecked("useLama", saved.use_lama);
+    setChecked("softAlpha", saved.soft_alpha);
+    setChecked("edgeRefine", saved.edge_refine);
+    syncEdgeRefineState();
     setChecked("layerFix", saved.layer_fix);
     setChecked("savePsd", saved.save_psd);
     setChecked("quantized", saved.quantized);
@@ -2420,6 +2466,8 @@
       seed: Number(seedInput.value),
       tblr_split: el("tblrSplit").checked,
       use_lama: el("useLama").checked,
+      soft_alpha: el("softAlpha").checked,
+      edge_refine: el("softAlpha").checked && el("edgeRefine").checked,
       save_psd: el("savePsd").checked,
       ragdoll_split: el("ragdoll").checked,
       ragdoll_confidence: Number(el("ragdollConf").value),
@@ -2850,6 +2898,7 @@
       });
 
     bindParamsMemory();
+    initEdgeRefineToggle();
     initHistory();
     initSplitters();
     sysStart();

@@ -80,6 +80,8 @@ DEFAULT_CONFIG = {
         "seed": 42,
         "tblr_split": True,
         "use_lama": True,
+        "soft_alpha": True,
+        "edge_refine": False,
         "save_psd": True,
         "ragdoll_split": False,
         "ragdoll_confidence": 0.3,
@@ -196,6 +198,8 @@ app.json.ensure_ascii = False
 # ---------------------------------------------------------------------------
 # 任务
 # ---------------------------------------------------------------------------
+_ERROR_TEMPLATES = ("推理进程异常退出",)
+
 _ERROR_KEYWORDS = (
     "out of memory",
     "outofmemory",
@@ -207,20 +211,47 @@ _ERROR_KEYWORDS = (
 )
 
 
+def _format_error_text(msg: str | None) -> str:
+    """把固定模板的报错收敛成有信息的形式：只留退出码。
+
+    「推理进程异常退出（退出码 2）」→「退出码 2」；
+    其它报错原样返回，避免误伤 OOM 这类本来就有用的长文本。
+    """
+    text = str(msg or "").strip()
+    if not text:
+        return ""
+    if any(t in text for t in _ERROR_TEMPLATES):
+        found = re.search(r"退出码\s*(-?\d+)", text)
+        # 有退出码就只留数字；连退出码都没有的纯模板没有信息量，留空
+        return f"退出码 {found.group(1)}" if found else ""
+    return text
+
+
 def _error_hint(history: list[dict]) -> str | None:
     """从任务日志里挑一条最像“根因”的错误，供历史记录展示。
 
-    优先找显存/内核这类关键词，否则退到时间上最后一条 error。
+    优先级：显存/内核这类关键词全文 → 退出码（只留数字）→ 最后一条真实报错。
+    「推理进程异常退出…」是固定模板，本身不含信息，不直接展示。
     """
     msgs = [str(e.get("msg") or "").strip() for e in history if e.get("level") == "error"]
     msgs = [m for m in msgs if m]
     if not msgs:
         return None
+
     for msg in msgs:
         low = msg.lower()
         if any(key in low for key in _ERROR_KEYWORDS):
             return msg[:200]
-    return msgs[-1][:200]
+
+    # 进程非零退出：退出码本身就是结论，去掉模板前缀
+    for msg in reversed(msgs):
+        formatted = _format_error_text(msg)
+        # 纯模板收敛成空串，跳过继续往上找
+        if formatted and formatted != msg.strip():
+            return formatted
+
+    real = [m for m in msgs if not any(t in m for t in _ERROR_TEMPLATES)]
+    return real[-1][:200] if real else None
 
 
 class Job:
@@ -534,6 +565,11 @@ def validate_params(raw: dict, patch_ok: bool) -> tuple[dict, list[dict]]:
     # --- 开关 ---
     clean["tblr_split"] = _as_bool(raw.get("tblr_split"), d["tblr_split"])
     clean["use_lama"] = _as_bool(raw.get("use_lama"), d["use_lama"])
+    clean["soft_alpha"] = _as_bool(raw.get("soft_alpha"), bool(d.get("soft_alpha", True)))
+    clean["edge_refine"] = _as_bool(raw.get("edge_refine"), bool(d.get("edge_refine", False)))
+    # 从属开关以主开关为前提：主关时强制关闭，避免旧记忆或手改请求让它白跑一次模型
+    if not clean["soft_alpha"]:
+        clean["edge_refine"] = False
     clean["save_psd"] = _as_bool(raw.get("save_psd"), d["save_psd"])
     clean["ragdoll_split"] = _as_bool(raw.get("ragdoll_split"), d["ragdoll_split"])
     clean["quantized"] = _as_bool(raw.get("quantized"), True)
@@ -592,15 +628,41 @@ def resolve_hf_endpoint() -> str | None:
 
 def guess_model_role(filename: str) -> str:
     name = filename.lower()
-    if "layerdiff" in name or "seethrough" in name:
-        return "layerdiff"
+    # 深度模型先判：原版仓库名是 seethroughv0.0.1_marigold，也带 seethrough，
+    # 若先匹配 layerdiff 会被错当成图层模型
     if "marigold" in name or "depth" in name:
         return "depth"
+    if "layerdiff" in name or "seethrough" in name:
+        return "layerdiff"
     return "unknown"
 
 
+def _dir_size(path: Path) -> int:
+    """目录总字节数（只 stat，不读内容）。"""
+    total = 0
+    try:
+        for child in path.rglob("*"):
+            try:
+                if child.is_file():
+                    total += child.stat().st_size
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return total
+
+
+def is_diffusers_dir(path: Path) -> bool:
+    """目录形态的模型：有 model_index.json 才算一个 diffusers 仓库。"""
+    return path.is_dir() and (path / "model_index.json").is_file()
+
+
 def scan_models() -> dict:
-    """递归扫描 models/ 下的 .gguf，供界面选择不同量化等级的模型。"""
+    """扫描 models/ 下的 GGUF 单文件与 diffusers 目录（原版 safetensors）。
+
+    目录形态的判定只看 model_index.json，所以模型放在 models/ 里或再套一层
+    子目录都能识别；目录内部不再继续下钻，避免把 unet/、vae/ 当模型。
+    """
     items: list[dict] = []
     base = MODELS_DIR.resolve()
     if MODELS_DIR.exists():
@@ -618,6 +680,29 @@ def scan_models() -> dict:
                     "name": path.name,
                     "size": size,
                     "role": guess_model_role(path.name),
+                    "kind": "gguf",
+                }
+            )
+
+        seen_dirs: set[Path] = set()
+        for idx in sorted(MODELS_DIR.rglob("model_index.json")):
+            model_dir = idx.parent
+            if model_dir in seen_dirs:
+                continue
+            seen_dirs.add(model_dir)
+            try:
+                rel = model_dir.relative_to(MODELS_DIR).as_posix()
+            except ValueError:
+                continue
+            if rel in (".", ""):
+                continue
+            items.append(
+                {
+                    "rel": rel,
+                    "name": model_dir.name,
+                    "size": _dir_size(model_dir),
+                    "role": guess_model_role(model_dir.name),
+                    "kind": "dir",
                 }
             )
 
@@ -634,13 +719,20 @@ def scan_models() -> dict:
 
 
 def resolve_model_choice(value: str, field: str) -> tuple[str | None, dict | None]:
-    """把前端传来的相对路径限制在 models/ 目录内，避免任意文件读取。"""
+    """把前端传来的相对路径限制在 models/ 目录内，避免任意文件读取。
+
+    两种形态都接受：GGUF 单文件，或含 model_index.json 的 diffusers 目录。
+    """
     if not isinstance(value, str) or not value.strip():
         return None, {"field": field, "code": "not_selected"}
     base = MODELS_DIR.resolve()
     target = (MODELS_DIR / value.strip()).resolve()
     if base != target and base not in target.parents:
         return None, {"field": field, "code": "outside_models"}
+    if target.is_dir():
+        if not is_diffusers_dir(target):
+            return None, {"field": field, "code": "not_diffusers_dir"}
+        return str(target), None
     if target.suffix.lower() != ".gguf":
         return None, {"field": field, "code": "not_gguf"}
     if not target.is_file():
@@ -650,21 +742,28 @@ def resolve_model_choice(value: str, field: str) -> tuple[str | None, dict | Non
 
 def build_command(job: Job, input_path: Path) -> list[str]:
     p = job.params
+    layer_path = str(p.get("layerdiff_path") or LAYERDIFF_GGUF)
+    depth_path = str(p.get("depth_path") or DEPTH_GGUF)
+    # 单个 .gguf → 走量化加载；目录（含 model_index.json）→ 走原生 diffusers
+    layer_is_gguf = layer_path.lower().endswith(".gguf")
+    depth_is_gguf = depth_path.lower().endswith(".gguf")
+
     args = [
         sys.executable,
         str(INFERENCE_SCRIPT),
         "--srcp", str(input_path),
         "--save_dir", str(job.out_dir),
-        "--gguf_layerdiff", str(p.get("layerdiff_path") or LAYERDIFF_GGUF),
-        "--gguf_depth", str(p.get("depth_path") or DEPTH_GGUF),
+        ("--gguf_layerdiff" if layer_is_gguf else "--repo_id_layerdiff"), layer_path,
+        ("--gguf_depth" if depth_is_gguf else "--repo_id_depth"), depth_path,
         "--resolution", str(p["width"]),
         "--inference_steps", str(p["inference_steps"]),
         "--seed", str(job.seed_used),
         "--attention-backend", str(p.get("attention_backend") or CONFIG.get("attention_backend", "native")),
         # 不传 --disable_progressbar：采样期间 tqdm 会输出步进，供日志展示
     ]
-    if p["quantized"]:
+    if p["quantized"] and layer_is_gguf:
         # 关键：不加这个，STM 会关闭流式加载（inference_utils: if not quantized: stream = False）
+        # 目录形态没有量化权重，传了只会让下游走无关分支
         args.append("--quantized")
     if p["inference_steps_depth"] != -1:
         args += ["--inference_steps_depth", str(p["inference_steps_depth"])]
@@ -686,6 +785,12 @@ def build_command(job: Job, input_path: Path) -> list[str]:
         ]
     if not p["use_lama"]:
         args.append("--no-use_lama")
+    if not p.get("soft_alpha", True):
+        # BooleanOptionalAction 的否定形式跟随参数名本身（soft_alpha），
+        # 生成的是 --no-soft_alpha；写成连字符会被 argparse 判为未知参数
+        args.append("--no-soft_alpha")
+    if p.get("edge_refine"):
+        args.append("--edge_refine")
     if p.get("save_cut_images"):
         args.append("--save_cut_images")
     if p.get("group_offload"):
@@ -1007,6 +1112,8 @@ def run_job(job: Job, input_path: Path) -> None:
         f"深度步数 {depth_label} · 深度分辨率 {p.get('resolution_depth', 'auto')}{mask_part} · "
         f"种子 {job.seed_used} · 量化 {'on' if p['quantized'] else 'off'} · "
         f"tblr {'on' if p['tblr_split'] else 'off'} · LaMa {'on' if p['use_lama'] else 'off'} · "
+        f"软边 {'on' if p.get('soft_alpha', True) else 'off'} · "
+        f"透明图精修 {'on' if p.get('edge_refine') else 'off'} · "
         f"attn {p.get('attention_backend', 'native')} · "
         f"PSD {'on' if p['save_psd'] else 'off'}",
         "sys",
@@ -1126,6 +1233,7 @@ def _gpu_info() -> dict | None:
 def _patch_state() -> dict:
     utils = STM_DIR / "common" / "utils" / "inference_utils.py"
     io_utils = STM_DIR / "common" / "utils" / "io_utils.py"
+    inference_psd = STM_DIR / "inference" / "scripts" / "inference_psd.py"
 
     def has(path: Path, marker: str) -> bool:
         try:
@@ -1137,6 +1245,7 @@ def _patch_state() -> dict:
         "use_lama": has(utils, "__STG_PATCHED_INFERENCE_UTILS__"),
         "layer_fix_drop": has(io_utils, "__STG_PATCHED_IO_UTILS_LAYER_FIX__"),
         "layer_fix_order": has(utils, "__STG_PATCHED_INFERENCE_UTILS_LAYER_FIX__"),
+        "edge_refine": has(inference_psd, "__STG_PATCHED_INFERENCE_PSDPY_EDGE_REFINE__"),
     }
 
 
@@ -1886,8 +1995,11 @@ def api_jobs():
                 "steps": params.get("inference_steps"),
                 "model": Path(model_path).name if model_path else None,
                 "error": meta.get("error"),
-                # 优先用日志里提炼的原因，其次退回退出码描述
-                "error_hint": meta.get("error_hint") or meta.get("error_detail"),
+                # error_hint 在任务结束时已按同一套规则算好并写入 meta；
+                # 这里只做一次文案收敛，让旧版本写下的模板文案也能显示成「退出码 N」
+                "error_hint": _format_error_text(
+                    meta.get("error_hint") or meta.get("error_detail")
+                ),
                 "has_input": has_input,
             }
         )
