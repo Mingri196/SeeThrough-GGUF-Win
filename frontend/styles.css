@@ -2286,3 +2286,223 @@ button.psd-file {
 .parts-toggle[aria-expanded="true"] .parts-toggle-arrow {
   transform: rotate(180deg);
 }
+
+/* ─────────────────────────── 历史记录抽屉 ─────────────────────────── */
+
+.stage {
+  position: relative;
+}
+
+#histBtn {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.stage-head .stage-tools {
+  margin-left: 8px;
+}
+
+.hist-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  width: 392px;
+  max-width: 92%;
+  background: var(--paper-raised);
+  border-left: 1px solid var(--line-strong);
+  box-shadow: -14px 0 32px rgba(26, 24, 19, 0.12);
+  transform: translateX(100%);
+  transition: transform var(--dur-2) var(--ease);
+}
+
+.hist-drawer.open {
+  transform: none;
+}
+
+.hist-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.hist-head b {
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+
+.hist-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+.hist-close {
+  margin-left: auto;
+  min-height: 24px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.hist-close:hover {
+  color: var(--accent);
+}
+
+.hist-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line-faint);
+}
+
+.hist-chip {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.hist-chip[aria-pressed="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+
+.hist-search {
+  margin-left: auto;
+  width: 100px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  outline: none;
+}
+
+.hist-search:focus {
+  border-color: var(--line-strong);
+}
+
+.hist-list {
+  flex: 1;
+  /* flex 子项默认 min-height:auto，不加这行内容一多就撑开、滚不动 */
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.hist-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line-faint);
+  border-left: 2px solid transparent;
+  cursor: pointer;
+}
+
+.hist-item:hover {
+  background: #f5f2ea;
+}
+
+.hist-item.ok {
+  border-left-color: var(--ok);
+}
+
+.hist-item.failed {
+  border-left-color: var(--err);
+}
+
+.hist-item.canceled {
+  border-left-color: var(--warn);
+}
+
+.hist-thumb-wrap {
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+}
+
+.hist-thumb {
+  display: block;
+  width: 42px;
+  height: 42px;
+  object-fit: cover;
+  border: 1px solid var(--line-faint);
+  background: var(--paper-sunk);
+}
+
+.hist-thumb-none {
+  display: block;
+  width: 42px;
+  height: 42px;
+  border: 1px dashed var(--line);
+  background: var(--paper-sunk);
+}
+
+.hist-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.hist-line1 {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hist-line2 {
+  margin-top: 1px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hist-line3 {
+  margin-top: 1px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hist-line3.bad {
+  color: var(--err);
+}
+
+.hist-line3.warn {
+  color: var(--warn);
+}
+
+.hist-empty {
+  margin: 0;
+  padding: 24px 14px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-muted);
+}

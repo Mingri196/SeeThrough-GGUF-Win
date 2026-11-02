@@ -256,6 +256,7 @@ For finer control while debugging, the environment variable takes granular value
 | Minutes per step, GPU at 100% but only 40–50 W | The resolution pushed you into the `streamed` tier: weights cross PCIe layer by layer and the GPU waits for data most of the time. Dropping to 768 returns to `resident` — on a 6 GB card **1024 ≈ 300 s/step → 768 ≈ 37 s/step** |
 | Want the `torch.compile` dequantisation speed-up (only meaningful for CC ≥ 7.0) | Double-click `4-install_triton.bat`: it inspects the environment → derives the matching Triton version → measures mirrors → installs → smoke-tests with a **real dequantisation kernel**, and only then sets `compile_dequant: true`. Running it again lets you keep / uninstall / reinstall. Cards below CC 7.0 are told clearly they do not qualify and the flag is never enabled. Commands and troubleshooting: [docs/triton-windows.en.md](docs/triton-windows.en.md); if you would rather not do it yourself, hand [docs/triton-windows-ai.md](docs/triton-windows-ai.md) to an AI |
 | Port already in use | Change `port` in `config.json`, or stop whatever holds 7860 |
+| After updating, `config.json` disappeared, or `git pull` fails with `Your local changes to config.json would be overwritten` | **Since 2026-11-02** `config.json` is no longer tracked (so each user's port and paths stop being committed and colliding); the repo ships `config.example.json` and the app generates `config.json` on first start. Updating from an older clone: back up your edited `config.json` as `config.json.bak` before pulling, start once so the new version writes the defaults, then merge your custom port/paths back in |
 
 ### Optional: install xformers (attention backend)
 
@@ -289,7 +290,7 @@ SeeThrough-GGUF-Win/
 ├── 4-install_triton.bat        # optional: install/uninstall triton-windows (speed up dequant compile)
 ├── requirements.txt           # STM dependencies + Flask (PyPI)
 ├── requirements-torch.txt     # PyTorch cu128 (dedicated index, architecture notes inside)
-├── config.json                # port, paths, defaults, constraints
+├── config.example.json        # config template; copied to config.json on first start (not tracked)
 ├── LICENSE                    # Apache-2.0 (whole repository)
 ├── NOTICE                     # copyright and upstream attribution
 ├── MODIFICATIONS.md           # line-by-line declaration of upstream changes (Apache-2.0 §4b)

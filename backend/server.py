@@ -196,6 +196,33 @@ app.json.ensure_ascii = False
 # ---------------------------------------------------------------------------
 # 任务
 # ---------------------------------------------------------------------------
+_ERROR_KEYWORDS = (
+    "out of memory",
+    "outofmemory",
+    "not enough memory",
+    "cuda error",
+    "no kernel image",
+    "illegal memory access",
+    "device-side assert",
+)
+
+
+def _error_hint(history: list[dict]) -> str | None:
+    """从任务日志里挑一条最像“根因”的错误，供历史记录展示。
+
+    优先找显存/内核这类关键词，否则退到时间上最后一条 error。
+    """
+    msgs = [str(e.get("msg") or "").strip() for e in history if e.get("level") == "error"]
+    msgs = [m for m in msgs if m]
+    if not msgs:
+        return None
+    for msg in msgs:
+        low = msg.lower()
+        if any(key in low for key in _ERROR_KEYWORDS):
+            return msg[:200]
+    return msgs[-1][:200]
+
+
 class Job:
     """一次推理任务。日志同时保存在内存队列（供 SSE）与 meta.json（供重启后查询）。"""
 
@@ -237,6 +264,7 @@ class Job:
             "status": self.status,
             "error": self.error,
             "error_detail": self.error_detail,
+            "error_hint": _error_hint(self.history),
             "params": self.params,
             "seed_used": self.seed_used,
             "outputs": self.outputs,
@@ -1809,6 +1837,75 @@ def api_status(job_id: str):
             "log_tail": job.history[-200:],
         }
     )
+
+
+@app.route("/api/jobs")
+def api_jobs():
+    """历史任务列表：读 outputs/jobs/*/meta.json，按时间倒序。"""
+    try:
+        limit = max(1, min(int(request.args.get("limit") or 40), 200))
+    except (TypeError, ValueError):
+        limit = 40
+
+    try:
+        dirs = [d for d in JOBS_DIR.iterdir() if d.is_dir()]
+        dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+    except OSError:
+        dirs = []
+
+    items = []
+    for d in dirs:
+        if len(items) >= limit:
+            break
+        meta_path = d / "meta.json"
+        if not meta_path.is_file():
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+
+        params = meta.get("params") or {}
+        started = meta.get("started_at")
+        finished = meta.get("finished_at")
+        elapsed = round(finished - started, 1) if started and finished else None
+        model_path = params.get("layerdiff_path")
+        has_input = any(
+            (d / ("input" + ext)).is_file() for ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp")
+        )
+
+        items.append(
+            {
+                "job_id": meta.get("job_id") or d.name,
+                "status": meta.get("status") or "unknown",
+                "started_at": started,
+                "finished_at": finished,
+                "elapsed": elapsed,
+                "width": params.get("width"),
+                "height": params.get("height"),
+                "steps": params.get("inference_steps"),
+                "model": Path(model_path).name if model_path else None,
+                "error": meta.get("error"),
+                # 优先用日志里提炼的原因，其次退回退出码描述
+                "error_hint": meta.get("error_hint") or meta.get("error_detail"),
+                "has_input": has_input,
+            }
+        )
+
+    return jsonify({"ok": True, "jobs": items})
+
+
+@app.route("/api/job_input/<job_id>")
+def api_job_input(job_id: str):
+    """历史记录里显示的原图（jobs/<id>/input.*），只读、限定目录。"""
+    if not re.fullmatch(r"[0-9a-f]{12}", job_id):
+        abort(400)
+    job_dir = JOBS_DIR / job_id
+    for ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
+        candidate = job_dir / ("input" + ext)
+        if candidate.is_file():
+            return send_from_directory(str(job_dir), candidate.name)
+    abort(404)
 
 
 @app.route("/api/current")

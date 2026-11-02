@@ -18,6 +18,22 @@
       "model.missing": "模型缺失",
       "model.details": "详情",
       "sys.note": "每 2 s 刷新",
+      "history.open": "历史记录",
+      "history.title": "历史记录",
+      "history.empty": "没有匹配的任务",
+      "history.loading": "读取中…",
+      "history.failed": "读取失败，稍后再试",
+      "history.search": "搜索",
+      "history.filterAll": "全部",
+      "history.filterOk": "成功",
+      "history.filterBad": "失败",
+      "history.stepsUnit": "步",
+      "history.noModel": "未知模型",
+      "history.st.completed": "成功",
+      "history.st.warning": "有警告",
+      "history.st.canceled": "已取消",
+      "history.st.failed": "失败",
+      "history.viewing": "正在查看历史任务",
       "sys.aria": "系统资源",
       "model.layerdiff": "LayerDiff3D",
       "model.depth": "Marigold3D",
@@ -225,6 +241,22 @@
       "model.missing": "Models missing",
       "model.details": "Details",
       "sys.note": "refreshed every 2 s",
+      "history.open": "History",
+      "history.title": "History",
+      "history.empty": "No matching jobs",
+      "history.loading": "Loading…",
+      "history.failed": "Failed to load",
+      "history.search": "Search",
+      "history.filterAll": "All",
+      "history.filterOk": "Done",
+      "history.filterBad": "Failed",
+      "history.stepsUnit": "steps",
+      "history.noModel": "unknown model",
+      "history.st.completed": "Done",
+      "history.st.warning": "Done with warning",
+      "history.st.canceled": "Canceled",
+      "history.st.failed": "Failed",
+      "history.viewing": "Viewing history job",
       "sys.aria": "System resources",
       "model.layerdiff": "LayerDiff3D",
       "model.depth": "Marigold3D",
@@ -593,6 +625,176 @@
     if (document.hidden) sysStop();
     else sysStart();
   });
+
+  /* ─────────────────────────── 历史记录 ─────────────────────────── */
+  /* 列表来自 /api/jobs（读 outputs/jobs/<id>/meta.json），点一条就把那次的结果
+     重新挂回成像台 —— 不重跑推理，只重新呈现。 */
+
+  const HIST = { jobs: [], filter: "all", query: "", loaded: false };
+
+  function histClass(status) {
+    if (status === "completed" || status === "completed_with_warning") return "ok";
+    if (status === "canceled") return "canceled";
+    return "failed";
+  }
+
+  function histStatusText(status) {
+    if (status === "completed") return t("history.st.completed");
+    if (status === "completed_with_warning") return t("history.st.warning");
+    if (status === "canceled") return t("history.st.canceled");
+    return t("history.st.failed");
+  }
+
+  function histClock(ts) {
+    if (!ts) return "—";
+    const d = new Date(ts * 1000);
+    const pad = (n) => String(n).padStart(2, "0");
+    return (
+      d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+      " " + pad(d.getHours()) + ":" + pad(d.getMinutes())
+    );
+  }
+
+  function renderHistory() {
+    const list = el("histList");
+    if (!list) return;
+    const q = HIST.query.trim().toLowerCase();
+    const rows = HIST.jobs.filter((job) => {
+      const ok = histClass(job.status) === "ok";
+      if (HIST.filter === "ok" && !ok) return false;
+      if (HIST.filter === "bad" && ok) return false;
+      if (!q) return true;
+      return (job.job_id + " " + (job.model || "") + " " + (job.width || "")).toLowerCase().indexOf(q) >= 0;
+    });
+
+    const okCount = HIST.jobs.filter((job) => histClass(job.status) === "ok").length;
+    el("histAll").textContent = t("history.filterAll") + " " + HIST.jobs.length;
+    el("histOk").textContent = t("history.filterOk") + " " + okCount;
+    el("histBad").textContent = t("history.filterBad") + " " + (HIST.jobs.length - okCount);
+    el("histCount").textContent = rows.length + " / " + HIST.jobs.length;
+
+    if (!rows.length) {
+      list.innerHTML = '<p class="hist-empty">' + t("history.empty") + "</p>";
+      return;
+    }
+
+    list.innerHTML = rows
+      .map((job) => {
+        const cls = histClass(job.status);
+        const bad = cls !== "ok";
+        // 有警告也算跑完了，但要把原因露出来，不能只留个绿条
+        const warn = job.status === "completed_with_warning";
+        const res = job.width && job.height ? job.width + " × " + job.height : "—";
+        const steps = job.steps != null ? job.steps + " " + t("history.stepsUnit") : "";
+        const cost = job.elapsed != null ? formatDuration(job.elapsed) : "";
+        const line1 = [res, steps, cost].filter(Boolean).join(" · ");
+        const reason = job.error_hint ? String(job.error_hint) : histStatusText(job.status);
+        const foot = [job.job_id.slice(0, 8), histClock(job.started_at), bad || warn ? reason : ""]
+          .filter(Boolean)
+          .join(" · ");
+        const thumb = job.has_input
+          ? '<img class="hist-thumb" src="/api/job_input/' + job.job_id + '" alt="" loading="lazy" />'
+          : '<span class="hist-thumb hist-thumb-none"></span>';
+        return (
+          '<div class="hist-item ' + cls + '" data-id="' + job.job_id + '">' +
+            '<div class="hist-thumb-wrap">' + thumb + "</div>" +
+            '<div class="hist-main">' +
+              '<div class="hist-line1">' + line1 + "</div>" +
+              '<div class="hist-line2">' + (job.model || t("history.noModel")) + "</div>" +
+              '<div class="hist-line3' + (bad ? " bad" : warn ? " warn" : "") + '">' + foot + "</div>" +
+            "</div>" +
+          "</div>"
+        );
+      })
+      .join("");
+  }
+
+  function loadHistory(force) {
+    const list = el("histList");
+    if (!list) return;
+    if (HIST.loaded && !force) {
+      renderHistory();
+      return;
+    }
+    list.innerHTML = '<p class="hist-empty">' + t("history.loading") + "</p>";
+    fetch("/api/jobs?limit=50", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        HIST.jobs = (data && data.jobs) || [];
+        HIST.loaded = true;
+        renderHistory();
+      })
+      .catch(() => {
+        list.innerHTML = '<p class="hist-empty">' + t("history.failed") + "</p>";
+      });
+  }
+
+  function setHistoryOpen(open) {
+    const drawer = el("histDrawer");
+    if (!drawer) return;
+    drawer.classList.toggle("open", open);
+    if (open) loadHistory(true);
+  }
+
+  function openHistoryJob(jobId) {
+    setHistoryOpen(false);
+    fetch("/api/status/" + jobId, { cache: "no-store" })
+      .then((res) => res.json())
+      .then((payload) => {
+        if (!payload || !payload.job_id) return;
+        state.finalized = null;
+        state.jobId = jobId;
+        // 右栏读数跟着这次历史任务走，左侧表单保持用户当前编辑的值不动
+        state.activeParams = Object.assign({}, payload.params || {}, {
+          seed: payload.seed_used != null ? payload.seed_used : (payload.params || {}).seed,
+        });
+        finalize(payload, jobId);
+        // finalize 会把副标题改成文件数，这里补一句"这是历史"避免和当前任务混淆
+        el("stageSub").textContent =
+          t("history.viewing") + " · " + jobId.slice(0, 8) + " · " + el("stageSub").textContent;
+      })
+      .catch(() => {});
+  }
+
+  function initHistory() {
+    const btn = el("histBtn");
+    if (!btn) return;
+    btn.addEventListener("click", () => {
+      const drawer = el("histDrawer");
+      setHistoryOpen(!drawer.classList.contains("open"));
+    });
+    el("histClose").addEventListener("click", () => setHistoryOpen(false));
+    el("histAll").addEventListener("click", () => {
+      HIST.filter = "all";
+      syncHistChips();
+      renderHistory();
+    });
+    el("histOk").addEventListener("click", () => {
+      HIST.filter = "ok";
+      syncHistChips();
+      renderHistory();
+    });
+    el("histBad").addEventListener("click", () => {
+      HIST.filter = "bad";
+      syncHistChips();
+      renderHistory();
+    });
+    el("histSearch").addEventListener("input", (event) => {
+      HIST.query = event.target.value;
+      renderHistory();
+    });
+    el("histList").addEventListener("click", (event) => {
+      const item = event.target.closest(".hist-item");
+      if (item) openHistoryJob(item.getAttribute("data-id"));
+    });
+  }
+
+  function syncHistChips() {
+    [["histAll", "all"], ["histOk", "ok"], ["histBad", "bad"]].forEach(([id, key]) => {
+      const node = el(id);
+      if (node) node.setAttribute("aria-pressed", HIST.filter === key ? "true" : "false");
+    });
+  }
 
   const state = {
     config: null,
@@ -1327,6 +1529,157 @@
     });
   });
 
+  /* ──────────────── 参数记忆：重开页面保持上次的选择 ──────────────── */
+  /* 只记 UI 侧状态（模式 + 原始值），不记算好的请求参数，
+     这样 config.json 的默认值改了也不会被旧快照顶掉。 */
+
+  const LS_PARAMS = "stg.params";
+
+  function readSavedParams() {
+    try {
+      const raw = localStorage.getItem(LS_PARAMS);
+      const data = raw ? JSON.parse(raw) : null;
+      return data && typeof data === "object" ? data : {};
+    } catch (err) {
+      return {};
+    }
+  }
+
+  function hasSavedParams() {
+    const saved = readSavedParams();
+    return Object.keys(saved).length > 0;
+  }
+
+  function snapshotParams() {
+    return {
+      width: Number(widthInput.value),
+      height: Number(heightInput.value),
+      steps: Number(stepsInput.value),
+      seed: Number(seedInput.value),
+      seed_mode: state.seedMode,
+      depth_steps: el("depthSteps").value,
+      depth_res_mode: el("depthResMode").value,
+      depth_res: el("depthRes").value,
+      mask_res_mode: el("maskResMode").value,
+      mask_res: el("maskRes").value,
+      attention: state.attnBackend,
+      tblr_split: el("tblrSplit").checked,
+      use_lama: el("useLama").checked,
+      layer_fix: el("layerFix").checked,
+      save_psd: el("savePsd").checked,
+      quantized: el("quantized").checked,
+      ragdoll_split: el("ragdoll").checked,
+      ragdoll_confidence: el("ragdollConf").value,
+      ragdoll_overlap: el("ragdollOverlap").value,
+      save_cut_images: el("cutImages").checked,
+      group_offload: el("groupOffload").checked,
+      keep_model: el("keepModel").checked,
+      parts: selectedParts(),
+    };
+  }
+
+  function writeSavedParams() {
+    try {
+      localStorage.setItem(LS_PARAMS, JSON.stringify(snapshotParams()));
+    } catch (err) {
+      /* 无痕模式写入会抛错；记不住不影响正常使用 */
+    }
+  }
+
+  // 叠加在 applyDefaults 之上：越界或非法的值一律丢弃，保留默认
+  function applySavedParams() {
+    const saved = readSavedParams();
+    const c = constraints();
+
+    const clamp = (value, min, max) => {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return null;
+      return Math.min(max, Math.max(min, n));
+    };
+    const setChecked = (id, value) => {
+      if (typeof value !== "boolean") return;
+      const node = el(id);
+      if (node) node.checked = value;
+    };
+
+    const size = clamp(saved.width, c.resolution_min, c.resolution_max);
+    if (size != null) {
+      const step = c.resolution_step || 64;
+      const snapped = Math.round(size / step) * step;
+      widthInput.value = snapped;
+      heightInput.value = snapped;
+    }
+
+    const steps = clamp(saved.steps, c.steps_min, c.steps_max);
+    if (steps != null) {
+      stepsInput.value = Math.round(steps);
+      stepsRange.value = String(Math.round(steps));
+    }
+
+    if (saved.seed != null && Number.isFinite(Number(saved.seed))) {
+      seedInput.value = Number(saved.seed);
+      state.fixedSeed = Number(saved.seed);
+    }
+    if (saved.seed_mode) setSeedMode(saved.seed_mode);
+
+    if (saved.depth_steps != null) {
+      const option = el("depthSteps").querySelector('option[value="' + saved.depth_steps + '"]');
+      if (option) el("depthSteps").value = saved.depth_steps;
+    }
+
+    if (["auto", "-1", "custom"].indexOf(saved.depth_res_mode) !== -1) {
+      el("depthResMode").value = saved.depth_res_mode;
+    }
+    if (saved.depth_res != null) el("depthRes").value = saved.depth_res;
+    syncDepthResUi();
+
+    if (["auto", "custom"].indexOf(saved.mask_res_mode) !== -1) {
+      el("maskResMode").value = saved.mask_res_mode;
+    }
+    if (saved.mask_res != null) el("maskRes").value = saved.mask_res;
+    syncMaskResUi();
+
+    // 注意力后端要在 syncAttnAvailability 之后覆盖，否则会被 config 默认值顶回
+    if (saved.attention === "native" || saved.attention === "xformers") {
+      setAttnBackend(saved.attention);
+    }
+
+    setChecked("tblrSplit", saved.tblr_split);
+    setChecked("useLama", saved.use_lama);
+    setChecked("layerFix", saved.layer_fix);
+    setChecked("savePsd", saved.save_psd);
+    setChecked("quantized", saved.quantized);
+    setChecked("ragdoll", saved.ragdoll_split);
+    setChecked("cutImages", saved.save_cut_images);
+    setChecked("groupOffload", saved.group_offload);
+    setChecked("keepModel", saved.keep_model);
+
+    const conf = clamp(saved.ragdoll_confidence, c.ragdoll_confidence_min, c.ragdoll_confidence_max);
+    if (conf != null) el("ragdollConf").value = conf;
+    const overlap = clamp(saved.ragdoll_overlap, c.ragdoll_overlap_min, c.ragdoll_overlap_max);
+    if (overlap != null) el("ragdollOverlap").value = overlap;
+
+    if (Array.isArray(saved.parts) && saved.parts.length) applyPartsDefault(saved.parts);
+
+    syncConfidenceOutput();
+    syncOverlapOutput();
+    validateInline();
+  }
+
+  // 改动即存，300 ms 防抖避免拖动滑杆时高频写盘
+  function bindParamsMemory() {
+    let timer = null;
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = setTimeout(writeSavedParams, 300);
+    };
+    document.querySelectorAll('[data-step="params"], [data-step="models"]').forEach((section) => {
+      section.addEventListener("change", schedule);
+      section.addEventListener("input", schedule);
+      section.addEventListener("click", schedule);
+    });
+  }
+
   function applyDefaults() {
     const d = (state.config && state.config.defaults) || {};
     const c = constraints();
@@ -1371,6 +1724,7 @@
 
     syncConfidenceOutput();
     syncOverlapOutput();
+    applySavedParams();
     updateFacts();
   }
 
@@ -2184,15 +2538,19 @@
         const job = payload && payload.job;
         if (!job || state.running || state.file) return;
         const params = job.params || {};
-        // 表单同步成这次任务的参数，避免"显示 1024、结果其实是 768"的错位
-        if (params.width) widthInput.value = params.width;
-        if (params.height) heightInput.value = params.height;
-        if (params.inference_steps) {
-          stepsInput.value = params.inference_steps;
-          if (stepsRange) stepsRange.value = params.inference_steps;
+        // 表单同步成这次任务的参数，避免"显示 1024、结果其实是 768"的错位。
+        // 但用户手动调过参数并留下了记忆时，表单以记忆为准——那是"下一次要用的"，
+        // 而读数仍然绑定这次任务（state.activeParams），两边不会打架。
+        if (!hasSavedParams()) {
+          if (params.width) widthInput.value = params.width;
+          if (params.height) heightInput.value = params.height;
+          if (params.inference_steps) {
+            stepsInput.value = params.inference_steps;
+            if (stepsRange) stepsRange.value = params.inference_steps;
+          }
+          if (job.seed_used != null) seedInput.value = job.seed_used;
+          syncResolution(widthInput);
         }
-        if (job.seed_used != null) seedInput.value = job.seed_used;
-        syncResolution(widthInput);
         updateFacts();
         validateInline();
 
@@ -2491,6 +2849,8 @@
         });
       });
 
+    bindParamsMemory();
+    initHistory();
     initSplitters();
     sysStart();
     introMotion();

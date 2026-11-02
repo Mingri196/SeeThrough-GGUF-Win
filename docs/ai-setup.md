@@ -81,7 +81,7 @@ if not exist 1-setup.bat echo MISSING setup
 dir /b
 ```
 
-期望的顶层内容：`1-setup.bat`、`2-launch.bat`、`3-env.bat`、`4-install_triton.bat`、`requirements.txt`、`requirements-torch.txt`、`config.json`、`backend\`、`frontend\`、`stm\`、`docs\`、`models\`（空）、`outputs\`。
+期望的顶层内容：`1-setup.bat`、`2-launch.bat`、`3-env.bat`、`4-install_triton.bat`、`requirements.txt`、`requirements-torch.txt`、`config.example.json`（首次启动自动生成 `config.json`）、`backend\`、`frontend\`、`stm\`、`docs\`、`models\`（空）、`outputs\`。
 
 **要知道的三件事**：
 
@@ -271,7 +271,7 @@ SeeThrough-GGUF-Win/
 ├── 4-install_triton.bat         # 可选：装/卸 triton-windows（见 docs/triton-windows.md）
 ├── requirements-torch.txt     # torch 2.8.0+cu128（专用索引，含架构说明）
 ├── requirements.txt           # STM 依赖 + Flask（PyPI）
-├── config.json                # 端口、路径、默认参数、约束范围
+├── config.example.json        # 配置模板；首次启动自动复制为 config.json（config.json 不入库）
 ├── LICENSE / NOTICE           # Apache-2.0（整个仓库）
 ├── MODIFICATIONS.md           # 对上游代码的逐行修改声明（Apache-2.0 §4b）
 ├── THIRD_PARTY_NOTICES.md     # 第三方组件与模型许可清单

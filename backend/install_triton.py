@@ -31,6 +31,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import components_paths  # noqa: E402,F401  首次运行时生成 config.json
+
 CONFIG_PATH = ROOT / "config.json"
 
 # torch 次版本 → 需要的 triton-windows 版本前缀（上游 README 的对应表）

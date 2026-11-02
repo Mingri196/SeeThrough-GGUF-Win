@@ -253,7 +253,8 @@ STM 的后处理默认总是用 LaMa 修补（`cluster_inpaint_part(..., inpaint
 | 日志长时间不刷新但任务在跑                                                             | 部分安全软件会缓冲 SSE；页面每 1.5 秒轮询 `/api/status` 兜底，属正常。采样期间日志会显示 `进度 12/30 · 40% · 37.2s/it`，卡住不动才是真卡住                                                                                                                                                                                                                    |
 | 一步要好几分钟、GPU 100% 但功耗只有 40–50 W                                            | 分辨率把显存档位挤进了 `streamed`：权重每层都从内存经 PCIe 搬一次，GPU 大半时间在等数据。降分辨率到 768 即可切回 `resident`，6 GB 显存设备实测 **1024 约 300 s/步 → 768 约 37 s/步**                                                                                                                                                                                    |
 | 想试 `torch.compile` 的反量化加速（只有 CC ≥ 7.0 的卡有意义）                              | 双击 `4-install_triton.bat`：它会检测环境 → 推导匹配的 Triton 版本 → 测速选源 → 安装 → 用**真实反量化 kernel** 做冒烟测试，通过才把 `compile_dequant` 置为 `true`。再运行一次可保留/卸载/重装。CC 低于 7.0 的卡会被明确提示「不达标」，装完也不会启用。命令与排错见 [docs/triton-windows.md](docs/triton-windows.md)；不想自己动手就把 [docs/triton-windows-ai.md](docs/triton-windows-ai.md) 整份丢给 AI，让它按任务书代劳 |
-| 端口被占用                                                                     | 改 `config.json` 的 `port`，或关掉占用 7860 的进程                                                                                                                                                                                                                                                                           |
+| 端口被占用 | 改 `config.json` 的 `port`，或关掉占用 7860 的进程 |
+| 更新后 `config.json` 不见了，或 `git pull` 报 `Your local changes to config.json would be overwritten` | **自 2026-11-02 起**，`config.json` 不再纳入仓库（避免各自改过的端口与路径被提交、互相覆盖），随代码提供的是 `config.example.json`，首次启动会自动生成 `config.json`。从旧版本更新上来：pull 前先把自己改过的 `config.json` 备份为 `config.json.bak`，pull 后启动一次让新版写出默认配置，再把端口、路径等自定义项合并回去 |
 
 ### 可选：安装 xformers（注意力后端）
 
@@ -285,7 +286,7 @@ SeeThrough-GGUF-Win/
 ├── 4-install_triton.bat        # 可选：安装/卸载 triton-windows（加速反量化编译）
 ├── requirements.txt           # STM 依赖 + Flask（PyPI）
 ├── requirements-torch.txt     # PyTorch cu128（专用索引，含架构说明）
-├── config.json                # 端口、路径、默认值、约束
+├── config.example.json        # 配置模板；首次启动自动复制为 config.json（后者不入库）
 ├── LICENSE                    # Apache-2.0（整个仓库）
 ├── NOTICE                     # 版权与上游署名
 ├── MODIFICATIONS.md           # 对上游代码的逐行修改声明（Apache-2.0 §4b）

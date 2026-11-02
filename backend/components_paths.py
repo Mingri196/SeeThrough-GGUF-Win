@@ -32,6 +32,27 @@ if not CONFIG_PATH.is_absolute():
 DEFAULT_DIR = "components"
 _USER_ALIASES = {"user", "system", "default", "off", "c"}
 
+EXAMPLE_PATH = ROOT / "config.example.json"
+
+
+def ensure_config_file() -> None:
+    """首次运行时把 config.example.json 复制成 config.json。
+
+    仓库里不再跟踪 config.json（它存每人的端口和路径），但所有入口脚本都假定
+    这个文件存在，所以在模块导入时补一次。已存在就什么都不做。
+    """
+    if CONFIG_PATH.exists() or not EXAMPLE_PATH.is_file():
+        return
+    try:
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_PATH.write_bytes(EXAMPLE_PATH.read_bytes())
+        print(f"[配置] 已从 {EXAMPLE_PATH.name} 生成 {CONFIG_PATH.name}")
+    except OSError as exc:
+        print(f"[WARN] 无法生成 {CONFIG_PATH.name}: {exc}")
+
+
+ensure_config_file()
+
 
 def _configured() -> str:
     try:

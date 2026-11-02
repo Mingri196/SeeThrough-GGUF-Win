@@ -429,6 +429,7 @@
       <header class="stage-head">
         <h2 data-i18n="stage.title">成像台</h2>
         <span class="stage-sub" id="stageSub" data-i18n="stage.sub">推理结果与图层下载</span>
+        <button class="ghost-btn mini" id="histBtn" type="button" data-i18n="history.open">历史记录</button>
         <div class="stage-tools" id="stageTools" hidden>
           <button class="ghost-btn mini" id="postBtn" type="button" aria-expanded="false" data-i18n="action.post">后处理重跑</button>
           <div class="post-pop" id="postPop" hidden>
@@ -513,6 +514,21 @@
           <p class="console-idle" id="logIdle" data-i18n="log.empty">等待任务开始</p>
         </div>
       </section>
+
+      <aside class="hist-drawer" id="histDrawer" aria-label="历史记录">
+        <div class="hist-head">
+          <b data-i18n="history.title">历史记录</b>
+          <span class="hist-count" id="histCount"></span>
+          <button class="hist-close" id="histClose" type="button">关闭 ×</button>
+        </div>
+        <div class="hist-filter">
+          <button class="hist-chip" id="histAll" type="button" aria-pressed="true"></button>
+          <button class="hist-chip" id="histOk" type="button" aria-pressed="false"></button>
+          <button class="hist-chip" id="histBad" type="button" aria-pressed="false"></button>
+          <input class="hist-search" id="histSearch" type="search" data-i18n-ph="history.search" placeholder="搜索" />
+        </div>
+        <div class="hist-list" id="histList"></div>
+      </aside>
     </section>
   </main>
 

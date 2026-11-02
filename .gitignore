@@ -9,6 +9,10 @@ triton/
 triton_windows/
 *.whl
 
+# 本地配置：端口、路径这些每人不同；仓库里只放 config.example.json，
+# 首次启动会自动复制一份成 config.json（见 backend/components_paths.py）
+config.json
+
 # 模型权重：体积大，且许可独立于本仓库
 models/*.gguf
 models/**/*.gguf
