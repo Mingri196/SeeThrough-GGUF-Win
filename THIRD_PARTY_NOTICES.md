@@ -12,6 +12,10 @@
 | GSAP 3.12.5 | `frontend/vendor/gsap.min.js` | GreenSock Standard License（<https://gsap.com/standard-license>，非 OSI 开源许可） | 允许免费用于本类项目，禁止用于与 GSAP 竞争的产品；文件头版权声明已保留 |
 | 本项目自有代码 | `backend/`、`frontend/`（除 vendor）、`*.bat`、`*.md` | **Apache-2.0**，全文见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE) | — |
 
+### 已移除：Monotype Arial 字体
+
+上游 `common/assets/arial.ttf` 是 Monotype 的 Arial（Version 3.00），字体内嵌的授权声明写明**仅限本机自用，不得复制或分发**，随本仓库公开分发与该条款冲突。本项目已于 2026-11-03 移除该文件，`common/utils/visualize.py` 改用 Pillow 自带的 `ImageFont.load_default(size=...)`，不再依赖任何外部字体文件。该字体原先只被训练/标注链路的可视化函数引用，不在本项目的推理执行路径上，移除对功能无影响。详情见 [MODIFICATIONS.md](MODIFICATIONS.md)。
+
 ## 2. 运行期由用户机器下载的模型/权重（本仓库不分发）
 
 许可信息于 2026-10-29 通过 `hf-mirror.com` 的模型 API 核对：

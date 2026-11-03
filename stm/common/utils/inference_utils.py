@@ -1,5 +1,6 @@
 # __STG_PATCHED_INFERENCE_UTILS_LAYER_FIX__
 # __STG_PATCHED_INFERENCE_UTILS__
+# __STG_PATCHED_INFERENCE_UTILS_HEAD_CROP__
 import os
 import os.path as osp
 import gc
@@ -230,6 +231,20 @@ def apply_layerdiff(
     elif tag_version == 'v3':
 
         def _crop_head(img, xywh):
+            # __STG_HEAD_CROP__ 头部裁剪的外扩倍数。
+            # 上游是 5（只往外扩 1/5 宽度）。head 层是"头皮+脸"，不含头发和发饰，
+            # 按它的 bbox 加这么一点边距，框会正好卡在发饰边缘：实测发包任务里
+            # head 88x85、发饰 125x119，裁剪框 122x119 —— 发饰占框 99%，
+            # 模型拿到一张"铺满发饰"的图，分不清哪是花哪是头发，把整条顶部
+            # 都判成 headwear，合成图头顶就多出一块横带。
+            # 默认改成 2（外扩 1/2），发饰占比降到约 50%，模型有头发和背景作参照。
+            # STG_HEAD_CROP=5 可退回上游行为，=1 表示按 head 原始 bbox 不扩。
+            try:
+                div = int(os.environ.get("STG_HEAD_CROP", "2"))
+            except (TypeError, ValueError):
+                div = 2
+            div = max(1, div)
+
             x, y, w, h = xywh
             ih, iw = img.shape[:2]
             x1 = x
@@ -237,11 +252,11 @@ def apply_layerdiff(
             x2 = x + w
             y2 = y + h
             if w < iw // 2:
-                px = min(iw - x - w, x, w // 5)
+                px = min(iw - x - w, x, w // div)
                 x1 = min(max(x - px, 0), iw)
                 x2 = min(max(x + w + px, 0), iw)
             if h < ih // 2:
-                py = min(ih - y - h, y, h // 5)
+                py = min(ih - y - h, y, h // div)
                 y2 = min(max(y + h + py, 0), ih)
                 y1 = min(max(y - py, 0), ih)
 

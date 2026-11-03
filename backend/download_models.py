@@ -26,6 +26,10 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
+import time
+import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -175,6 +179,421 @@ def human(num: int | None) -> str:
     return f"{num / 1024 ** 3:.2f} GB" if num >= 1024 ** 3 else f"{num / 1024 ** 2:.0f} MB"
 
 
+# ── 辅助组件并发下载 ────────────────────────────────────────────────────
+# 五个组件各开一个线程同时下，每个组件自己维护状态与字节数，界面按行固定刷新。
+# 某个组件完成/失败/重试只改它自己那一行的数据，不影响其它行。
+
+S_WAITING = "等待"
+S_PROBE = "探测大小"
+S_DOWNLOAD = "下载中"
+S_RETRY = "重试中"
+S_EXISTS = "已存在"
+S_DONE = "完成"
+S_FAILED = "失败"
+
+_STATUS_COLOR = {
+    S_WAITING: "90",
+    S_PROBE: "36",
+    S_DOWNLOAD: "36",
+    S_RETRY: "33",
+    S_EXISTS: "90",
+    S_DONE: "32",
+    S_FAILED: "31",
+}
+
+
+def _char_width(ch: str) -> int:
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+
+def _text_width(text: str) -> int:
+    return sum(_char_width(ch) for ch in text)
+
+
+def _fit(text: str, width: int) -> str:
+    """按显示宽度截断并补空格。中文占两格，直接用 len() 对齐会歪。"""
+    out, used = [], 0
+    for ch in text:
+        cw = _char_width(ch)
+        if used + cw > width:
+            if used < width:
+                out.append("…")
+                used += 1
+            break
+        out.append(ch)
+        used += cw
+    return "".join(out) + " " * max(0, width - used)
+
+
+def _bytes_text(num: int | None) -> str:
+    if num is None:
+        return "—"
+    if num == 0:
+        return "0 B"
+    if num < 1024:
+        return f"{int(num)} B"
+    if num < 1024 ** 2:
+        return f"{num / 1024:.0f} KB"
+    if num < 1024 ** 3:
+        return f"{num / 1024 ** 2:.1f} MB"
+    return f"{num / 1024 ** 3:.2f} GB"
+
+
+def _enable_ansi() -> bool:
+    """Windows 10+ 打开 VT 序列支持，才能把光标移回去重画那几行。"""
+    try:
+        if not sys.stdout.isatty():
+            return False
+    except Exception:
+        return False
+    if os.name != "nt":
+        return True
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-11)
+        mode = ctypes.c_uint32()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return False
+        if mode.value & 0x0004:
+            return True
+        return bool(kernel32.SetConsoleMode(handle, mode.value | 0x0004))
+    except Exception:
+        return False
+
+
+class _Comp:
+    """单个组件的进度状态。每个线程只写自己的实例。"""
+
+    def __init__(self, spec: dict):
+        self.spec = spec
+        self.key = spec["key"]
+        self.label = spec["label"]
+        self.repo = spec["repo"]
+        self.files = list(spec["files"])
+        self.lock = threading.Lock()
+        self.status = S_WAITING
+        self.done = 0
+        self.total = 0
+        self.total_known = False
+        self.error = ""
+
+    def set_status(self, status: str, error: str = "") -> None:
+        with self.lock:
+            self.status = status
+            if error:
+                self.error = error
+
+    def set_total(self, total: int) -> None:
+        with self.lock:
+            if total:
+                self.total = total
+                self.total_known = True
+
+    def add(self, n: int) -> None:
+        with self.lock:
+            self.done += max(0, int(n or 0))
+
+    def set_done(self, value: int) -> None:
+        with self.lock:
+            self.done = max(0, int(value))
+
+    def snapshot(self) -> dict:
+        with self.lock:
+            return {
+                "status": self.status,
+                "done": self.done,
+                "total": self.total,
+                "total_known": self.total_known,
+                "error": self.error,
+            }
+
+
+class _Dashboard:
+    """固定 N 行，按列重画。每行只读自己那组数据。"""
+
+    def __init__(self, comps: list[_Comp]):
+        self.comps = comps
+        self.stream = sys.stdout
+        self.ansi = _enable_ansi()
+        self.rows_drawn = 0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._last: dict[str, tuple[int, float, float]] = {}
+        self._last_status: dict[str, str] = {}
+        cols = shutil.get_terminal_size((100, 24)).columns
+        self.width = max(70, min(cols - 1, 108))
+        # 一行 = 序号3 + 名称(label_w+2) + 状态10 + 进度(bar+5) + 大小22 + 速度10
+        self.bar = 18 if self.width >= 96 else (12 if self.width >= 84 else 8)
+        self.label_w = max(10, min(24, self.width - self.bar - 52))
+
+    # -- 渲染 ----------------------------------------------------------
+    def _color(self, text: str, code: str) -> str:
+        return f"\033[{code}m{text}\033[0m" if self.ansi else text
+
+    def _row(self, idx: int, comp: _Comp) -> str:
+        s = comp.snapshot()
+        known = s["total_known"] and s["total"] > 0
+        pct = int(min(100, s["done"] * 100 / s["total"])) if known else 0
+        if s["status"] in (S_DONE, S_EXISTS):
+            pct = 100
+        filled = int(round(pct * self.bar / 100)) if known else 0
+        bar = "█" * filled + "░" * (self.bar - filled)
+        pct_text = f"{pct:>3}%" if known else "  --"
+
+        # 速度：两次采样之间的增量，采样间隔不到 0.5 s 就沿用上次的值，免得闪烁
+        now = time.monotonic()
+        prev = self._last.get(comp.key)
+        speed = 0.0
+        if prev is None:
+            self._last[comp.key] = (s["done"], now, 0.0)
+        else:
+            speed = prev[2]
+            dt = now - prev[1]
+            if dt >= 0.5:
+                speed = max(0.0, (s["done"] - prev[0]) / dt)
+                self._last[comp.key] = (s["done"], now, speed)
+        if s["status"] != S_DOWNLOAD:
+            speed = 0.0
+
+        size = f"{_bytes_text(s['done'])} / {_bytes_text(s['total'])}" if known else _bytes_text(s["done"])
+        speed_text = f"{_bytes_text(speed)}/s" if speed > 0 else ""
+
+        status = _fit(s["status"], 9)
+        colored = self._color(status, _STATUS_COLOR.get(s["status"], "0"))
+        return (
+            f"{idx:>2} "
+            f"{_fit(comp.label, self.label_w)}  "
+            f"{colored} "
+            f"{bar} {pct_text} "
+            f"{_fit(size, 21)} "
+            f"{_fit(speed_text, 9)}"
+        )
+
+    def _header(self) -> None:
+        self.stream.write("\n")
+        self.stream.write(self._color("辅助组件下载（各组件独立进度，同时进行）", "1") + "\n")
+        title = (
+            f"{'#':>2} "
+            f"{_fit('组件', self.label_w)}  "
+            f"{_fit('状态', 9)} "
+            f"{_fit('进度', self.bar + 5)} "
+            f"{_fit('已下载 / 总大小', 21)} "
+            f"{_fit('速度', 9)}"
+        )
+        self.stream.write(self._color(title, "90") + "\n")
+        self.stream.write(self._color("-" * (self.label_w + self.bar + 52), "90") + "\n")
+        self.stream.flush()
+
+    def _draw(self) -> None:
+        rows = [self._row(i, c) for i, c in enumerate(self.comps, 1)]
+        if self.ansi:
+            if self.rows_drawn:
+                self.stream.write(f"\033[{self.rows_drawn}A")
+            for row in rows:
+                self.stream.write("\033[2K" + row + "\n")
+            self.stream.flush()
+            self.rows_drawn = len(rows)
+            return
+        # 没有 VT 支持：只在状态变化时追加一行，探测/等待这类过程态不刷屏
+        for comp, row in zip(self.comps, rows):
+            status = comp.snapshot()["status"]
+            if status in (S_WAITING, S_PROBE):
+                continue
+            if self._last_status.get(comp.key) == status:
+                continue
+            self._last_status[comp.key] = status
+            s = comp.snapshot()
+            extra = f" {_bytes_text(s['done'])}"
+            if s["total_known"] and s["total"]:
+                extra += f" / {_bytes_text(s['total'])}"
+            self.stream.write(f"[{status}] {comp.label}{extra}\n")
+        self.stream.flush()
+
+    # -- 生命周期 ------------------------------------------------------
+    def _loop(self) -> None:
+        while not self._stop.wait(0.25):
+            try:
+                self._draw()
+            except Exception:
+                pass
+
+    def start(self) -> None:
+        self._header()
+        self._draw()
+        self._thread = threading.Thread(target=self._loop, name="dl-dashboard", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=2)
+        try:
+            self._draw()
+        except Exception:
+            pass
+        if not self.ansi:
+            for comp in self.comps:
+                s = comp.snapshot()
+                if not s["error"]:
+                    continue
+                self.stream.write(f"[失败] {comp.label}: {s['error']}\n")
+        self.stream.write("\n")
+
+
+def _make_tracker(comp: _Comp):
+    """给 hf_hub_download 用的进度条替身：不自己画，只把字节数喂给组件状态。"""
+    from huggingface_hub.utils import tqdm as hf_tqdm
+
+    class _Tracker(hf_tqdm):
+        def __init__(self, *args, **kwargs):
+            kwargs.pop("disable", None)
+            initial = kwargs.get("initial") or 0
+            total = kwargs.get("total") or 0
+            super().__init__(*args, **kwargs)
+            self.disable = False
+            if total:
+                comp.set_total(total)
+            if initial:
+                comp.add(initial)
+
+        def display(self, *args, **kwargs):  # 不输出，界面由 _Dashboard 负责
+            pass
+
+        def close(self):  # tqdm 收尾会写换行，会打乱光标位置
+            pass
+
+        def update(self, n=1):
+            if n:
+                comp.add(n)
+
+    return _Tracker
+
+
+def _component_worker(comp: _Comp, endpoint: str, force: bool) -> None:
+    from huggingface_hub import hf_hub_download
+
+    hub_dir = torch_checkpoints_dir() if comp.spec.get("torch_hub") else None
+    if hub_dir:
+        hub_dir.mkdir(parents=True, exist_ok=True)
+
+    comp.set_status(S_PROBE)
+    # 先看缓存里有什么：缓存命中就以本地文件大小为准（HEAD 走 hf-mirror 时
+    # Content-Length 经常不准，小文件会返回几十字节，拿它比大小会误判成未缓存）
+    cached_paths: dict[str, Path | None] = {}
+    sizes: dict[str, int] = {}
+    for filename in comp.files:
+        hit = None
+        if not force:
+            try:
+                probe = Path(hf_hub_download(repo_id=comp.repo, filename=filename, local_files_only=True))
+                if probe.exists():
+                    hit = probe
+            except Exception:
+                hit = None
+        cached_paths[filename] = hit
+        if hit is not None:
+            sizes[filename] = hit.stat().st_size
+        else:
+            sizes[filename] = remote_size(endpoint, comp.repo, filename) or 0
+    comp.set_total(sum(sizes.values()))
+
+    counted = 0
+    downloaded_any = False
+    for filename in comp.files:
+        short = filename.split("/")[-1]
+
+        cached_path = cached_paths.get(filename)
+        if cached_path is not None:
+            counted += cached_path.stat().st_size
+            comp.set_done(counted)
+            comp.set_status(S_EXISTS)
+            if hub_dir:
+                dest = hub_dir / short
+                if not dest.exists() or dest.stat().st_size != cached_path.stat().st_size:
+                    shutil.copy2(cached_path, dest)
+            continue
+
+        comp.set_status(S_DOWNLOAD)
+        last_exc: Exception | None = None
+        for attempt in (1, 2):
+            try:
+                path = Path(
+                    hf_hub_download(
+                        repo_id=comp.repo,
+                        filename=filename,
+                        force_download=force,
+                        tqdm_class=_make_tracker(comp),
+                    )
+                )
+                counted += path.stat().st_size
+                comp.set_done(counted)
+                downloaded_any = True
+                if hub_dir:
+                    dest = hub_dir / short
+                    if force or not dest.exists() or dest.stat().st_size != path.stat().st_size:
+                        shutil.copy2(path, dest)
+                last_exc = None
+                break
+            except Exception as exc:
+                last_exc = exc
+                if is_missing_file(exc):
+                    last_exc = None  # 仓库里没有这个文件，跳过即可
+                    break
+                if attempt == 1:
+                    comp.set_status(S_RETRY, f"{type(exc).__name__}: {exc}")
+                    time.sleep(1.0)
+                    comp.set_status(S_DOWNLOAD)
+        if last_exc is not None:
+            comp.set_status(S_FAILED, f"{type(last_exc).__name__}: {last_exc}")
+            raise last_exc
+
+    s = comp.snapshot()
+    comp.set_done(max(s["done"], s["total"] if s["total_known"] else 0))
+    comp.set_status(S_DONE if downloaded_any else S_EXISTS)
+
+
+def download_components(endpoint: str, selected: list[dict], force: bool,
+                        jobs: int = 0, dashboard: bool = True) -> list[tuple[str, str]]:
+    """并发下载辅助组件，返回 [(组件名, 错误)]。"""
+    comps = [_Comp(spec) for spec in selected]
+    if not comps:
+        return []
+
+    dash = _Dashboard(comps) if dashboard else None
+    if dash:
+        dash.start()
+    else:
+        for comp in comps:
+            print(f"[组件] {comp.label} ← {endpoint}/{comp.repo}")
+
+    failures: list[tuple[str, str]] = []
+
+    def run(comp: _Comp) -> None:
+        try:
+            _component_worker(comp, endpoint, force)
+        except Exception as exc:
+            comp.set_status(S_FAILED, f"{type(exc).__name__}: {exc}")
+            failures.append((comp.label, f"{type(exc).__name__}: {exc}"))
+
+    workers = jobs if jobs > 0 else len(comps)
+    with ThreadPoolExecutor(max_workers=min(workers, len(comps))) as pool:
+        list(pool.map(run, comps))
+
+    if dash:
+        dash.stop()
+
+    done = sum(1 for c in comps if c.snapshot()["status"] in (S_DONE, S_EXISTS))
+    if not failures:
+        print(f"[OK] {len(comps)} 个辅助组件全部就位（{done} 个已就绪）")
+    else:
+        print(f"[警告] {len(comps)} 个辅助组件中 {len(failures)} 个未就绪：")
+        for label, err in failures:
+            print(f"       - {label}: {err}")
+    return failures
+
+
 def torch_checkpoints_dir() -> Path:
     """与 torch.hub.get_dir()/checkpoints 保持一致（不 import torch，避免拖慢脚本）。"""
     base = os.environ.get("TORCH_HOME")
@@ -233,37 +652,6 @@ def download_models(endpoint: str, targets: list[dict], force: bool) -> list[tup
     return failures
 
 
-def download_component(comp: dict, force: bool) -> tuple[list[str], list[tuple[str, Exception]]]:
-    """下载单个组件的全部文件；返回 (缺失文件, 失败列表)。"""
-    from huggingface_hub import hf_hub_download
-
-    missing: list[str] = []
-    failures: list[tuple[str, Exception]] = []
-    hub_dir = torch_checkpoints_dir() if comp.get("torch_hub") else None
-    if hub_dir:
-        hub_dir.mkdir(parents=True, exist_ok=True)
-
-    for filename in comp["files"]:
-        short = filename.split("/")[-1]
-        try:
-            cached = Path(hf_hub_download(repo_id=comp["repo"], filename=filename, force_download=force))
-            if hub_dir:
-                dest = hub_dir / short
-                if force or not dest.exists() or dest.stat().st_size != cached.stat().st_size:
-                    shutil.copy2(cached, dest)
-                    print(f"        {short} → {dest}")
-            else:
-                print(f"        {short}（{human(cached.stat().st_size)}）")
-        except Exception as exc:
-            if is_missing_file(exc):
-                missing.append(filename)
-                print(f"        {short}: 远端不存在，跳过")
-            else:
-                failures.append((filename, exc))
-                print(f"        {short}: 失败（{type(exc).__name__}）")
-    return missing, failures
-
-
 def main() -> int:
     # 组件缓存默认落在项目内 components/（HF_HOME / TORCH_HOME），与 WebUI 保持一致
     try:
@@ -281,6 +669,10 @@ def main() -> int:
     parser.add_argument("--no-ragdoll", action="store_true", help="不预取 RTMPose（省约 293 MB）")
     parser.add_argument("--component", action="append", choices=[c["key"] for c in COMPONENTS],
                         help="只预取指定组件，可重复")
+    parser.add_argument("--jobs", type=int, default=0,
+                        help="同时下载的组件数，0 = 全部并发")
+    parser.add_argument("--no-dashboard", action="store_true",
+                        help="关闭多行进度面板，改为逐行输出（日志/CI 用）")
     args = parser.parse_args()
 
     if str(os.environ.get("STG_SKIP_MODELS", "")).strip() == "1":
@@ -348,17 +740,15 @@ def main() -> int:
 
     failures = download_models(endpoint, targets, args.force) if targets else []
 
-    comp_failures: list[tuple[str, str, Exception]] = []
+    comp_failures: list[tuple[str, str]] = []
     if want_components:
-        for comp in selected:
-            print(f"\n[组件] {comp['label']} ← {endpoint}/{comp['repo']}")
-            missing, bad = download_component(comp, args.force)
-            for filename, exc in bad:
-                comp_failures.append((comp["label"], filename, exc))
-            if missing:
-                print(f"       （{len(missing)} 个可选文件远端不存在，已跳过）")
-            if not bad:
-                print(f"       {comp['label']} 就绪")
+        comp_failures = download_components(
+            endpoint,
+            selected,
+            args.force,
+            jobs=args.jobs,
+            dashboard=not args.no_dashboard,
+        )
 
     hf_cache, torch_cache = cache_paths()
     print("\n== 缓存位置 ==")
@@ -374,9 +764,9 @@ def main() -> int:
         return 1
 
     if comp_failures:
-        print("\n[警告] 部分辅助组件未就绪（不影响启动，首次推理时会再尝试）：")
-        for label, filename, exc in comp_failures:
-            print(f"  - {label} / {filename}: {type(exc).__name__}: {exc}")
+        print("[警告] 部分辅助组件未就绪（不影响启动，首次推理时会再尝试）：")
+        for label, err in comp_failures:
+            print(f"  - {label}: {err}")
     elif args.components_only:
         print("\n[OK] 辅助组件已就位，首次推理无需再联网。")
         print("     主模型未处理：请把 GGUF 放进 models/，或运行本脚本（不带 --components-only）下载。")

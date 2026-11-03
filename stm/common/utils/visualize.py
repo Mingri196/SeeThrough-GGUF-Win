@@ -1,3 +1,4 @@
+# __STG_PATCHED_VISUALIZE_FONT__
 import math
 import os.path as osp
 from enum import IntEnum
@@ -334,6 +335,19 @@ def draw_line(d: ImageDraw.ImageDraw, a, b, w=1, c='r'):
 
     
 
+def _stg_text_font(size):
+    """取一个可用的等宽程度够用的字体，用于在调试图上写数字与标签。
+
+    上游这里读的是仓库内附带的 Arial。Arial 是 Monotype 的商业字体，字体内嵌的授权
+    明确禁止再分发，随仓库一起公开与该条款冲突，因此改成 Pillow 自带字形。
+    该字体只覆盖拉丁字符与数字，调用方写的都是 keypoint 置信度与英文标签，够用。
+    """
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:  # Pillow < 10.1 的 load_default() 不接受 size
+        return ImageFont.load_default()
+
+
 def visualize_pos_keypoints(image: Image.Image, bbox=None, keypoints=None, scores=None):
     if isinstance(image, np.ndarray):
         image = Image.fromarray(image)
@@ -349,7 +363,7 @@ def visualize_pos_keypoints(image: Image.Image, bbox=None, keypoints=None, score
         keypoints = keypoints[:len(coco_keypoints)]
         for ii, kp in enumerate(keypoints):
             draw_dot(d, kp, s=5, c='r')
-        font = ImageFont.truetype("assets/arial.ttf", size=20)
+        font = _stg_text_font(20)
         if scores is not None:
             # fnt = ImageFont.load_default(size=30)
             for ii, kp in enumerate(keypoints):
@@ -367,7 +381,7 @@ def pil_draw_text(image: Image.Image, text, point, fill=(0, 0, 0, 255), font_siz
         is_ndarray = True
     d = ImageDraw.Draw(image)
     if font is None:
-        font = ImageFont.truetype("assets/arial.ttf", size=font_size)
+        font = _stg_text_font(font_size)
     if not isinstance(text, list):
         text = [text]
         point = [point]

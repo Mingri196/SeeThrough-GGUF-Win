@@ -17,6 +17,10 @@ config.json
 models/*.gguf
 models/**/*.gguf
 
+# 上游附带的商业字体（Monotype Arial）：授权禁止再分发，本机留存也不要入库。
+# 代码已改用 Pillow 自带字形，见 MODIFICATIONS.md 第 5 节。
+stm/common/assets/arial.ttf
+
 # 运行产物（用户上传的原图、图层 PNG、PSD、cuts/、pose_keypoints.json 等）
 outputs/
 

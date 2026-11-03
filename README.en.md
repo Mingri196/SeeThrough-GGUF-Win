@@ -24,13 +24,15 @@ Then install and launch:
 2-launch.bat     :: → http://localhost:7860
 ```
 
-You only need **Python 3.12 (or uv)** — Git is not required. `1-setup.bat` will:
+You only need **Python 3.12 (or uv)** — Git is not required. `1-setup.bat` runs in seven stages, each with its own heading, and prints a summary of anything that went wrong at the end:
 
 1. verify the vendored `stm/`;
-2. create `.venv` and install PyTorch cu128 + dependencies (~8 GB);
-3. verify the `use_lama` patch (idempotent, skipped if already applied);
-4. probe `huggingface.co` vs `hf-mirror.com` — **mirror is normally picked in mainland China, official elsewhere** — then prefetch the helper components needed by the first run (~2.4 GB, cached in the project's `components/` folder); **main models are not downloaded**;
-5. run a self-check and print the result.
+2. prepare `.venv` (reused when it already exists);
+3. install PyTorch cu128;
+4. install STM and backend dependencies (~8 GB);
+5. verify the `use_lama` and `layer_fix` patches (idempotent, skipped if already applied);
+6. probe `huggingface.co` vs `hf-mirror.com` — **mirror is normally picked in mainland China, official elsewhere** — then prefetch the five helper components **in parallel** (~2.2 GB, cached in the project's `components/` folder). Each component gets its own row with status, downloaded/total size and percentage, and a failure or retry in one row does not disturb the others; **main models are not downloaded**;
+7. run a self-check and print the result.
 
 Afterwards drop the two GGUF files into `models/` (see section 2); if "Model selection" can see them, you are good to go.
 

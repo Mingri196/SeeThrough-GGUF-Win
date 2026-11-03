@@ -24,13 +24,15 @@ cd SeeThrough-GGUF-Win
 2-launch.bat     :: → http://localhost:7860
 ```
 
-只需要 **Python 3.12（或 uv）**，不需要 Git。`1-setup.bat` 会自动：
+只需要 **Python 3.12（或 uv）**，不需要 Git。`1-setup.bat` 分七步执行，每步打印独立标题，结束时汇总有问题的步骤：
 
 1. 校验内置的 `stm/`；
-2. 创建 `.venv` 并安装 PyTorch cu128 + 依赖（约 8 GB）；
-3. 校验 `use_lama` 补丁（幂等，已打过会跳过）；
-4. 探测 `huggingface.co` 与 `hf-mirror.com`，**国内通常自动选镜像、海外选官方**，预取首次推理要用的辅助组件（约 2.4 GB，缓存到项目内 `components/`）；**不下载主模型**；
-5. 自检并打印结果。
+2. 准备 `.venv`（已存在则复用，不重建）；
+3. 安装 PyTorch cu128；
+4. 安装 STM 与后端依赖（约 8 GB）；
+5. 校验 `use_lama` 与 `layer_fix` 补丁（幂等，已打过会跳过）；
+6. 探测 `huggingface.co` 与 `hf-mirror.com`，**国内通常自动选镜像、海外选官方**，然后**并发**预取五个辅助组件（约 2.2 GB，缓存到项目内 `components/`）——每个组件占一行、各自刷新，显示状态、已下载量/总大小与百分比，某个组件失败或重试不影响其余组件的进度；**不下载主模型**；
+7. 自检并打印结果。
 
 装完还需要把两个 GGUF 放进 `models/`（见第 2 节），页面「模型选择」里能选到就能跑。想跳过组件下载：先 `set STG_SKIP_MODELS=1` 再运行 `1-setup.bat`；想连主模型一起下：`.venv\Scripts\python.exe backend\download_models.py`。
 
