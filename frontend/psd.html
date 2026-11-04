@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PSD 预览 · SeeThrough GGUF</title>
+<link rel="stylesheet" href="/styles.css" />
+<style>
+  html, body {
+    margin: 0;
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+  }
+
+  .psd-app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+
+  /* ── 顶栏 ───────────────────────────────────────────── */
+  .psd-top {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 46px;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--line);
+    background: var(--paper-raised);
+    flex: 0 0 auto;
+  }
+  .psd-top .file {
+    font-family: var(--font-display);
+    font-size: 14px;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 40vw;
+  }
+  .psd-top .facts {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ink-muted);
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+  }
+  .psd-top .spacer { flex: 1 1 auto; }
+  .psd-top .zoom {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--ink-soft);
+    min-width: 52px;
+    text-align: right;
+  }
+  .tbtn {
+    height: 26px;
+    padding: 0 10px;
+    font: inherit;
+    font-size: 12px;
+    color: var(--ink-soft);
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .tbtn:hover { border-color: var(--line-strong); color: var(--ink); }
+  .tbtn[aria-pressed="true"] {
+    background: var(--accent-wash);
+    border-color: var(--accent);
+    color: var(--accent-deep);
+  }
+
+  /* ── 主体 ───────────────────────────────────────────── */
+  .psd-main {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .viewport {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    cursor: default;
+    background-color: var(--paper-sunk);
+  }
+  /* 棋盘底：透明区域靠它才看得出来 */
+  .viewport[data-bg="checker"] {
+    background-image: repeating-conic-gradient(#ded8c9 0% 25%, #f2eee3 0% 50%);
+    background-size: 18px 18px;
+  }
+  .viewport[data-bg="dark"] { background: #16130f; }
+  .viewport[data-bg="light"] { background: #ffffff; }
+
+  .viewport canvas {
+    position: absolute;
+    inset: 0;
+    display: block;
+  }
+  .viewport.is-panning { cursor: grabbing; }
+
+  .hint {
+    position: absolute;
+    left: 14px;
+    bottom: 12px;
+    padding: 4px 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ink-muted);
+    background: color-mix(in srgb, var(--paper-raised) 82%, transparent);
+    border: 1px solid var(--line-faint);
+    border-radius: 2px;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    gap: 8px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--ink-muted);
+    background: color-mix(in srgb, var(--paper) 88%, transparent);
+  }
+  .overlay[hidden] { display: none; }
+  .overlay .bar {
+    width: 220px;
+    height: 3px;
+    background: var(--paper-sunk);
+    overflow: hidden;
+  }
+  .overlay .bar span {
+    display: block;
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    transition: width 120ms linear;
+  }
+  .overlay .err { color: var(--err); max-width: 520px; line-height: 1.6; }
+
+  /* ── 图层栏 ─────────────────────────────────────────── */
+  .panel {
+    width: 268px;
+    flex: 0 0 268px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-left: 1px solid var(--line);
+    background: var(--paper-raised);
+  }
+  .panel-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line-faint);
+    flex: 0 0 auto;
+  }
+  .panel-head h2 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--ink-soft);
+  }
+  .panel-head .count {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ink-muted);
+  }
+  .panel-head .spacer { flex: 1 1 auto; }
+  .mini {
+    height: 22px;
+    padding: 0 7px;
+    font: inherit;
+    font-size: 11px;
+    color: var(--ink-muted);
+    background: transparent;
+    border: 1px solid var(--line-faint);
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  .mini:hover { color: var(--ink); border-color: var(--line-strong); }
+
+  .layer-list {
+    list-style: none;
+    margin: 0;
+    padding: 2px 0 16px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .layer-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--line-faint);
+    user-select: none;
+  }
+  .layer-row:hover { background: var(--paper); }
+  .layer-row.is-off { opacity: 0.42; }
+  .layer-row .eye {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    color: var(--ink-soft);
+  }
+  .layer-row.is-off .eye { color: var(--ink-muted); }
+  .layer-row .thumb {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 30px;
+    object-fit: contain;
+    background-image: repeating-conic-gradient(#ded8c9 0% 25%, #f2eee3 0% 50%);
+    background-size: 8px 8px;
+    border: 1px solid var(--line-faint);
+  }
+  .layer-row .label {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .layer-row .name {
+    font-size: 12px;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .layer-row .dim {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--ink-muted);
+  }
+</style>
+</head>
+<body>
+<div class="psd-app">
+  <header class="psd-top">
+    <span class="file" id="fileName">—</span>
+    <span class="facts" id="fileFacts"></span>
+    <span class="spacer"></span>
+    <button class="tbtn" id="btnFit" type="button">适应窗口</button>
+    <button class="tbtn" id="btnActual" type="button">100%</button>
+    <button class="tbtn" id="btnBg" type="button" aria-pressed="false">深色底</button>
+    <span class="zoom" id="zoomLabel">—</span>
+  </header>
+
+  <div class="psd-main">
+    <div class="viewport" id="viewport" data-bg="checker">
+      <canvas id="stage"></canvas>
+      <div class="hint" id="hint">滚轮缩放 · 按住中键拖动</div>
+      <div class="overlay" id="overlay">
+        <p id="overlayText">正在加载 PSD…</p>
+        <div class="bar" id="overlayBar"><span id="overlayFill"></span></div>
+      </div>
+    </div>
+
+    <aside class="panel">
+      <div class="panel-head">
+        <h2>图层</h2>
+        <span class="count" id="layerCount"></span>
+        <span class="spacer"></span>
+        <button class="mini" id="btnAllOn" type="button">全显</button>
+        <button class="mini" id="btnAllOff" type="button">全隐</button>
+      </div>
+      <ul class="layer-list" id="layerList"></ul>
+    </aside>
+  </div>
+</div>
+<script src="/psd.js"></script>
+</body>
+</html>

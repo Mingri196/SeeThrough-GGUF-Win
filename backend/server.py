@@ -37,8 +37,10 @@ import sys
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from flask import Flask, Response, abort, jsonify, request, send_from_directory
 
@@ -87,6 +89,7 @@ DEFAULT_CONFIG = {
         "ragdoll_confidence": 0.3,
         "ragdoll_overlap": 0.2,
         "group_offload": False,
+        "memory_profile": "auto",
         "save_cut_images": True,
         "layer_fix": True,
         "parts": None,
@@ -106,6 +109,26 @@ DEFAULT_CONFIG = {
         "ragdoll_overlap_min": 0.0,
         "ragdoll_overlap_max": 0.5,
     },
+}
+
+
+# 显存策略。auto 不传任何参数，由 STM 的 resolve_layerdiff_memory_options
+# 按分辨率、模型体积和总显存自己挑；其余四个档位把该档的五个取值显式传下去，
+# 覆盖掉自动判定。取值与 stm/common/utils/inference_utils.py 里的默认表一致：
+# (stream_weights, spatial_frame_chunk, temporal_token_chunk, feed_forward_chunk,
+#  spill_frame_residuals)
+MEMORY_PROFILES = {
+    "resident": (False, 0, 0, 0, False),
+    "balanced": (False, 3, 512, 1, False),
+    "streamed": (True, 3, 512, 1, False),
+    "low_vram": (True, 1, 256, 1, True),
+}
+
+MEMORY_PROFILE_LABELS = {
+    "resident": "常驻",
+    "balanced": "均衡",
+    "streamed": "流式",
+    "low_vram": "低显存",
 }
 
 CONFIG = json.loads(json.dumps(DEFAULT_CONFIG))  # deep copy
@@ -575,6 +598,11 @@ def validate_params(raw: dict, patch_ok: bool) -> tuple[dict, list[dict]]:
     clean["quantized"] = _as_bool(raw.get("quantized"), True)
     clean["keep_model"] = _as_bool(raw.get("keep_model"), True)
     clean["group_offload"] = _as_bool(raw.get("group_offload"), bool(d.get("group_offload", False)))
+    profile = str(raw.get("memory_profile") or d.get("memory_profile") or "auto").strip().lower()
+    if profile not in ("auto", *MEMORY_PROFILES):
+        err("memory_profile", "invalid_value", allowed=["auto", *MEMORY_PROFILES])
+        profile = "auto"
+    clean["memory_profile"] = profile
     clean["save_cut_images"] = _as_bool(raw.get("save_cut_images"), bool(d.get("save_cut_images", True)))
     clean["layer_fix"] = _as_bool(raw.get("layer_fix"), bool(d.get("layer_fix", True)))
 
@@ -795,6 +823,18 @@ def build_command(job: Job, input_path: Path) -> list[str]:
         args.append("--save_cut_images")
     if p.get("group_offload"):
         args.append("--group_offload")
+    # 显存策略：非 auto 时把该档的五个取值显式传下去，覆盖 STM 的自动判定。
+    # auto 一个都不传，保持上游行为（None → 由 resolve_layerdiff_memory_options 算）。
+    spec = MEMORY_PROFILES.get(p.get("memory_profile") or "auto")
+    if spec:
+        stream, spatial, temporal, ff, spill = spec
+        args.append("--stream-weights" if stream else "--no-stream-weights")
+        args += [
+            "--spatial-frame-chunk", str(spatial),
+            "--temporal-token-chunk", str(temporal),
+            "--feed-forward-chunk", str(ff),
+        ]
+        args.append("--spill-frame-residuals" if spill else "--no-spill-frame-residuals")
     if p.get("parts"):
         args += ["--parts", *[str(tag) for tag in p["parts"]]]
     return args
@@ -1118,6 +1158,12 @@ def run_job(job: Job, input_path: Path) -> None:
         f"PSD {'on' if p['save_psd'] else 'off'}",
         "sys",
     )
+
+    # STM 打印的 "LayerDiff memory profile" 只反映它按显存算出的档位名，
+    # 手动指定时那个名字不会变（只有取值被覆盖），容易看着矛盾。这里补一句。
+    profile = p.get("memory_profile") or "auto"
+    if profile in MEMORY_PROFILE_LABELS:
+        job.log(f"显存策略 · {MEMORY_PROFILE_LABELS[profile]}（手动指定，覆盖自动判定）", "sys")
 
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
@@ -2364,6 +2410,134 @@ def api_file(job_id: str, rel: str):
         as_attachment=request.args.get("download") == "1",
         download_name=Path(rel).name,
     )
+
+
+# ---------------------------------------------------------------------------
+# PSD 预览：把 PSD 拆成"图层元数据 + 每层 PNG"，交给 frontend/psd.html 在浏览器里叠加
+# ---------------------------------------------------------------------------
+# 为什么不直接用浏览器端 PSD 解析库：走 psd_tools 一次解析的实测开销很低
+# （22 层 PSD 打开 8 ms、全部编码 182 ms、PNG 合计 0.88 MB），解析结果按文件
+# mtime 缓存在内存里，单层请求直接吐字节；省掉一个几百 KB 的前端依赖。
+PSD_CACHE: "OrderedDict[str, dict]" = OrderedDict()
+PSD_CACHE_MAX = 2          # 最多同时缓存两个 PSD（每个几 MB，防止长时间运行堆内存）
+PSD_LAYER_MAX = 200        # 超过这么多层就拒绝，避免外部超大 PSD 拖死页面
+PSD_JOB_ID_RE = re.compile(r"^[0-9a-f]{12}$")
+# 打开预览页时会同时发出 1 个 layers 请求 + N 个单层请求。不加锁的话这些请求会
+# 各自拿同一个 PSD 解析一遍（实测 22 层约 190 ms/次），白白吃满 CPU。
+PSD_LOCK = threading.Lock()
+
+
+def _psd_target(job_id: str, rel: str) -> Path:
+    """把 (job_id, rel) 解析成 out 目录下的 .psd 文件，越界或类型不符直接 404。"""
+    if not PSD_JOB_ID_RE.match(job_id or ""):
+        abort(404)
+    job_dir = JOBS_DIR / job_id
+    base = (job_dir / "out").resolve()
+    if not base.exists():
+        abort(404)
+    target = (base / rel).resolve()
+    if target != base and base not in target.parents:
+        abort(400)
+    if not target.is_file() or target.suffix.lower() != ".psd":
+        abort(404)
+    return target
+
+
+def _psd_load(target: Path) -> dict:
+    """解析 PSD 并缓存：{canvas, layers[], blobs{index: png bytes}}。
+
+    持锁解析：同一份 PSD 只会被解一次，其余并发请求等锁后直接命中缓存。
+    """
+    stat = target.stat()
+    key = f"{target}|{int(stat.st_mtime)}|{stat.st_size}"
+    with PSD_LOCK:
+        cached = PSD_CACHE.get(key)
+        if cached is not None:
+            PSD_CACHE.move_to_end(key)
+            return cached
+
+        from psd_tools import PSDImage
+
+        psd = PSDImage.open(str(target))
+        layers: list[dict] = []
+        blobs: dict[int, bytes] = {}
+        for order, layer in enumerate(psd):          # 索引 0 = 最底层
+            if layer.is_group():
+                continue
+            try:
+                img = layer.topil()
+            except Exception:
+                continue
+            if img is None:
+                continue
+            img = img.convert("RGBA")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG", compress_level=6)
+            idx = len(layers)
+            blobs[idx] = buf.getvalue()
+            layers.append(
+                {
+                    "index": idx,
+                    "name": layer.name or f"layer {order}",
+                    "left": int(layer.left),
+                    "top": int(layer.top),
+                    "width": img.width,
+                    "height": img.height,
+                    "opacity": int(layer.opacity),
+                    "visible": bool(layer.visible),
+                }
+            )
+            if len(layers) > PSD_LAYER_MAX:
+                raise ValueError(f"图层数超过 {PSD_LAYER_MAX}，不支持预览")
+
+        data = {"canvas": [int(psd.width), int(psd.height)], "layers": layers, "blobs": blobs}
+        PSD_CACHE[key] = data
+        while len(PSD_CACHE) > PSD_CACHE_MAX:
+            PSD_CACHE.popitem(last=False)
+        return data
+
+
+@app.route("/psd/<job_id>")
+def psd_viewer(job_id: str):
+    """预览页本身。参数由页面里的脚本从 URL 读，服务端只负责发 HTML。"""
+    return send_from_directory(str(FRONTEND), "psd.html")
+
+
+@app.route("/api/psd/<job_id>/layers")
+def api_psd_layers(job_id: str):
+    rel = request.args.get("file") or ""
+    target = _psd_target(job_id, rel)
+    try:
+        data = _psd_load(target)
+    except Exception as exc:                      # 损坏或不支持的 PSD
+        return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), 500
+    quoted = quote(rel)
+    layers = [
+        {**item, "url": f"/api/psd/{job_id}/layer/{item['index']}.png?file={quoted}"}
+        for item in data["layers"]
+    ]
+    return jsonify(
+        {
+            "ok": True,
+            "file": Path(rel).name,
+            "canvas": data["canvas"],
+            "layers": layers,
+        }
+    )
+
+
+@app.route("/api/psd/<job_id>/layer/<int:index>.png")
+def api_psd_layer(job_id: str, index: int):
+    rel = request.args.get("file") or ""
+    target = _psd_target(job_id, rel)
+    try:
+        data = _psd_load(target)
+    except Exception:
+        abort(404)
+    blob = data["blobs"].get(index)
+    if blob is None:
+        abort(404)
+    return Response(blob, mimetype="image/png", headers={"Cache-Control": "private, max-age=3600"})
 
 
 @app.errorhandler(413)

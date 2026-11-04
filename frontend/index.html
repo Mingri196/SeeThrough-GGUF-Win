@@ -394,6 +394,20 @@
 
         <p class="field-note" id="modelsNote" data-i18n="models.note">扫描 models/ 及其子目录；子目录按完整路径显示。</p>
 
+        <div class="field">
+          <div class="field-row">
+            <label class="field-label" for="memoryProfile" data-i18n="field.memoryProfile">显存策略</label>
+          </div>
+          <select id="memoryProfile" class="select-wide">
+            <option value="auto" data-i18n="mem.auto">自动（默认）</option>
+            <option value="resident" data-i18n="mem.resident">常驻</option>
+            <option value="balanced" data-i18n="mem.balanced">均衡</option>
+            <option value="streamed" data-i18n="mem.streamed">流式</option>
+            <option value="low_vram" data-i18n="mem.lowVram">低显存</option>
+          </select>
+          <p class="field-note" data-i18n="mem.note">自动按分辨率、模型大小与显存挑档位；手动指定会覆盖它。</p>
+        </div>
+
         <div class="switches">
           <label class="switch" id="keepModelSwitch">
             <input type="checkbox" id="keepModel" checked />

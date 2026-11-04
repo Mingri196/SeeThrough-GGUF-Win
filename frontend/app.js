@@ -92,6 +92,13 @@
       "field.layerModel": "图层模型",
       "field.depthModel": "深度模型",
       "models.note": "扫描 models/ 及其子目录；子目录按完整路径显示，便于区分同名的不同量化等级。",
+      "field.memoryProfile": "显存策略",
+      "mem.auto": "自动（默认）",
+      "mem.resident": "常驻",
+      "mem.balanced": "均衡",
+      "mem.streamed": "流式",
+      "mem.lowVram": "低显存",
+      "mem.note": "自动按分辨率、模型大小与显存挑档位。",
       "keep.label": "模型常驻",
       "keep.note": "任务结束后保留模型，下一轮免加载",
       "keep.offload": "分组卸载",
@@ -168,6 +175,7 @@
       "stage.psd": "PSD",
       "stage.meta": "清单",
       "stage.openFolder": "打开文件夹",
+      "stage.previewPsd": "预览 PSD",
       "action.post": "后处理重跑",
       "action.postStart": "开始",
       "post.hint": "不重跑采样，约 1–3 分钟",
@@ -234,7 +242,6 @@
       "level.progress": "RUN",
 
       "log.seedUsed": "实际种子 {seed}",
-      "log.fileChanged": "已更换输入图片，旧结果已清除",
       "log.cancelRequest": "已请求取消…",
       "log.elapsed": "耗时 {sec} 秒",
       "misc.unknown": "未知",
@@ -323,6 +330,13 @@
       "field.layerModel": "Layer model",
       "field.depthModel": "Depth model",
       "models.note": "Scans models/ and its subfolders; subfolders are shown as full paths so same-named quants stay distinguishable.",
+      "field.memoryProfile": "VRAM profile",
+      "mem.auto": "Auto (default)",
+      "mem.resident": "Resident",
+      "mem.balanced": "Balanced",
+      "mem.streamed": "Streamed",
+      "mem.lowVram": "Low VRAM",
+      "mem.note": "Auto picks a profile from resolution, model size and VRAM.",
       "keep.label": "Keep model loaded",
       "keep.note": "Keeps the model in VRAM after a run so the next one skips loading",
       "keep.offload": "Group offload",
@@ -399,6 +413,7 @@
       "stage.psd": "PSD",
       "stage.meta": "Manifests",
       "stage.openFolder": "Open folder",
+      "stage.previewPsd": "Preview PSD",
       "action.post": "Re-post-process",
       "action.postStart": "Start",
       "post.hint": "No sampling, about 1–3 min",
@@ -466,7 +481,6 @@
       "level.progress": "RUN",
 
       "log.seedUsed": "Seed used: {seed}",
-      "log.fileChanged": "Input image changed — previous result cleared",
       "log.cancelRequest": "Cancellation requested…",
       "log.elapsed": "Elapsed {sec}s",
       "misc.unknown": "unknown",
@@ -1430,12 +1444,8 @@
     el("fileCard").hidden = false;
     renderFileSpec();
 
-    // 换图即清空上一张的结果与任务痕迹
-    resetResultArea();
-    if (state.jobId) {
-      appendLog({ ts: Date.now(), level: "sys", msg: t("log.fileChanged") });
-      state.jobId = null;
-    }
+    // 换图不清旧结果：上一张的分层结果、任务目录、历史记录都保留，
+    // 方便拿两种图的结果对着看。新任务开始提交时才重置（见 submit()）。
     hideNotice();
     refreshRunButton();
   }
@@ -1484,9 +1494,8 @@
   });
 
   el("fileRemove").addEventListener("click", () => {
+    // 同理：移除输入图只清输入区，右栏结果与 state.jobId 保留
     resetFile();
-    resetResultArea();
-    state.jobId = null;
   });
 
   /* ────────────────────────────── 参数 ────────────────────────────── */
@@ -1629,6 +1638,10 @@
 
   const LS_PARAMS = "stg.params";
 
+  // 显存策略的取值。auto 交给 STM 按分辨率、模型大小和显存自己挑；
+  // 其余四个对应 STM 的 resident / balanced / streamed / low-vram 档位。
+  const MEMORY_PROFILES = ["auto", "resident", "balanced", "streamed", "low_vram"];
+
   function readSavedParams() {
     try {
       const raw = localStorage.getItem(LS_PARAMS);
@@ -1670,6 +1683,7 @@
       save_cut_images: el("cutImages").checked,
       group_offload: el("groupOffload").checked,
       keep_model: el("keepModel").checked,
+      memory_profile: el("memoryProfile").value,
       parts: selectedParts(),
     };
   }
@@ -1771,6 +1785,9 @@
     setChecked("cutImages", saved.save_cut_images);
     setChecked("groupOffload", saved.group_offload);
     setChecked("keepModel", saved.keep_model);
+    if (MEMORY_PROFILES.includes(saved.memory_profile)) {
+      el("memoryProfile").value = saved.memory_profile;
+    }
 
     const conf = clamp(saved.ragdoll_confidence, c.ragdoll_confidence_min, c.ragdoll_confidence_max);
     if (conf != null) el("ragdollConf").value = conf;
@@ -1817,6 +1834,7 @@
     el("ragdollConf").value = d.ragdoll_confidence != null ? d.ragdoll_confidence : 0.3;
     el("ragdollOverlap").value = d.ragdoll_overlap != null ? d.ragdoll_overlap : 0.2;
     el("groupOffload").checked = d.group_offload === true;
+    el("memoryProfile").value = MEMORY_PROFILES.includes(d.memory_profile) ? d.memory_profile : "auto";
     el("cutImages").checked = d.save_cut_images !== false;
     el("layerFix").checked = d.layer_fix !== false;
     syncAttnAvailability();
@@ -2445,6 +2463,24 @@
       openBtn.title = psds.map((o) => o.name).join(" · ");
       openBtn.addEventListener("click", () => revealFolder());
       el("psdFiles").appendChild(openBtn);
+
+      // 主 PSD 才有预览价值：深度 PSD 是单通道逐层同形状，看起来没有信息量
+      const mainPsd = psds.find((o) => o.kind === "psd_main") || psds[0];
+      if (mainPsd && state.jobId) {
+        const previewLink = document.createElement("a");
+        previewLink.className = "psd-file";
+        previewLink.href =
+          `/psd/${encodeURIComponent(state.jobId)}` +
+          `?file=${encodeURIComponent(mainPsd.rel)}`;
+        previewLink.target = "_blank";
+        previewLink.rel = "noopener";
+        previewLink.title = mainPsd.name;
+        previewLink.innerHTML =
+          `<span class="name">${escapeHtml(t("stage.previewPsd"))}</span>` +
+          `<span class="arrow">↗</span>`;
+        el("psdFiles").appendChild(previewLink);
+      }
+
       el("psdBar").hidden = false;
     } else {
       el("psdBar").hidden = true;
@@ -2599,6 +2635,7 @@
       group_offload: el("groupOffload").checked,
       save_cut_images: el("cutImages").checked,
       layer_fix: el("layerFix").checked,
+      memory_profile: el("memoryProfile").value,
       parts: (() => {
         const picked = selectedParts();
         return picked.length === PART_TOTAL ? null : picked;

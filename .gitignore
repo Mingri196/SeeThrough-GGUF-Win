@@ -13,9 +13,13 @@ triton_windows/
 # 首次启动会自动复制一份成 config.json（见 backend/components_paths.py）
 config.json
 
-# 模型权重：体积大，且许可独立于本仓库
-models/*.gguf
-models/**/*.gguf
+# 模型权重：体积大，且许可独立于本仓库。
+# 整个 models/ 都忽略而不是只忽略 *.gguf——模型可以是单个 GGUF，也可以是
+# diffusers 目录（内含 model_index.json + 若干 .safetensors），后者按后缀
+# 匹配漏得掉，git add -A 会把几 GB 权重一起吞进提交。只保留占位文件。
+models/*
+!models/.gitkeep
+*.safetensors
 
 # 上游附带的商业字体（Monotype Arial）：授权禁止再分发，本机留存也不要入库。
 # 代码已改用 Pillow 自带字形，见 MODIFICATIONS.md 第 5 节。
